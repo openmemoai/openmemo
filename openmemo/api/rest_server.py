@@ -25,7 +25,9 @@ def create_app(db_path: str = None) -> Flask:
     CORS(app)
 
     db = db_path or os.environ.get("OPENMEMO_DB", "openmemo.db")
-    memory = Memory(db_path=db)
+    from openmemo.storage.sqlite_store import SQLiteStore
+    store = SQLiteStore(db_path=db, check_same_thread=False)
+    memory = Memory(db_path=db, store=store)
 
     @app.route("/health")
     def health():
