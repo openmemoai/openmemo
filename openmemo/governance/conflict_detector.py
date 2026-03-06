@@ -25,9 +25,10 @@ class Conflict:
 
 class ConflictDetector:
     NEGATION_PAIRS = [
-        ("prefers", "dislikes"), ("likes", "hates"), ("uses", "avoids"),
-        ("always", "never"), ("true", "false"), ("yes", "no"),
-        ("enabled", "disabled"), ("on", "off"), ("active", "inactive"),
+        ("prefers", "dislikes"), ("likes", "hates"), ("likes", "dislikes"),
+        ("uses", "avoids"), ("always", "never"), ("true", "false"),
+        ("yes", "no"), ("enabled", "disabled"), ("on", "off"),
+        ("active", "inactive"), ("supports", "opposes"),
     ]
 
     def __init__(self):
@@ -53,14 +54,17 @@ class ConflictDetector:
         return conflicts
 
     def _is_conflicting(self, text_a: str, text_b: str) -> bool:
+        words_a = set(text_a.split())
+        words_b = set(text_b.split())
+
         for pos, neg in self.NEGATION_PAIRS:
-            if pos in text_a and neg in text_b:
-                shared_words = set(text_a.split()) & set(text_b.split())
-                if len(shared_words) >= 2:
+            if pos in words_a and neg in words_b:
+                shared = (words_a - {pos}) & (words_b - {neg})
+                if len(shared) >= 2:
                     return True
-            if neg in text_a and pos in text_b:
-                shared_words = set(text_a.split()) & set(text_b.split())
-                if len(shared_words) >= 2:
+            if neg in words_a and pos in words_b:
+                shared = (words_a - {neg}) & (words_b - {pos})
+                if len(shared) >= 2:
                     return True
 
         return False
