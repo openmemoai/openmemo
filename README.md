@@ -54,9 +54,11 @@ OpenMemo transforms raw notes into structured memory AI can actually use.
 
 - Structured note format
 - AI-ready knowledge storage
-- Context-aware search
-- Modular API architecture
+- Context-aware search (BM25 + vector similarity)
+- Modular API architecture (Python SDK + REST)
 - AI integration ready
+- Memory Pyramid for automatic compression
+- Conflict detection and version management
 
 ---
 
@@ -74,19 +76,21 @@ OpenMemo can power:
 
 ## Getting Started
 
-Clone the repository:
+### Install from GitHub
+
+```bash
+pip install git+https://github.com/openmemoai/openmemo.git
+```
+
+### Or clone and install locally
 
 ```bash
 git clone https://github.com/openmemoai/openmemo.git
-```
-
-Install dependencies:
-
-```bash
+cd openmemo
 pip install -e ".[dev]"
 ```
 
-Quick example:
+### Quick example
 
 ```python
 from openmemo import Memory
@@ -101,6 +105,46 @@ for r in results:
     print(r["content"], r["score"])
 ```
 
+### With vector search (optional)
+
+```python
+from openmemo import Memory
+
+def my_embed(text):
+    # Use any embedding model
+    return model.encode(text).tolist()
+
+memory = Memory(embed_fn=my_embed)
+memory.add("User prefers dark mode")
+results = memory.recall("UI preference")  # Uses both BM25 + vector similarity
+```
+
+### REST Server
+
+```bash
+pip install openmemo[server]
+python -m openmemo.api.rest_server
+```
+
+```bash
+# Add a memory
+curl -X POST http://localhost:8080/api/memories \
+  -H "Content-Type: application/json" \
+  -d '{"content": "User prefers dark mode"}'
+
+# Recall
+curl -X POST http://localhost:8080/api/memories/recall \
+  -H "Content-Type: application/json" \
+  -d '{"query": "user preference"}'
+```
+
+### Docker
+
+```bash
+cd docker
+docker compose up
+```
+
 ---
 
 ## Roadmap
@@ -111,7 +155,7 @@ Upcoming features:
 - AI summarization pipelines
 - Plugin system
 - External integrations
-- Memory retrieval APIs
+- Distributed memory sync
 
 ---
 
