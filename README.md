@@ -5,6 +5,7 @@ OpenMemo gives AI systems long-term memory.
 OpenMemo is an open-source memory layer designed for AI agents, assistants, and AI-driven workflows.
 Instead of storing information as plain text, OpenMemo structures knowledge so AI systems can remember, resolve conflicts, and retrieve reliable facts over time.
 
+![OpenMemo Demo](docs/openmemo-demo.gif)
 ---
 
 ## Why OpenMemo
