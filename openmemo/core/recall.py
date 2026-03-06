@@ -3,7 +3,7 @@ Recall Engine - Tri-brain retrieval architecture.
 
 Three retrieval strategies:
 - Fast Brain: keyword/BM25 matching
-- Middle Brain: semantic embedding similarity
+- Middle Brain: semantic embedding similarity (vector store)
 - Slow Brain: LLM-powered reasoning (optional)
 
 Results are merged and reranked with token budget control.
@@ -25,8 +25,10 @@ class RecallResult:
 
 
 class RecallEngine:
-    def __init__(self, store=None):
+    def __init__(self, store=None, vector_store=None, embed_fn=None):
         self.store = store
+        self.vector_store = vector_store
+        self.embed_fn = embed_fn
 
     def recall(self, query: str, top_k: int = 10, budget: int = 2000) -> List[RecallResult]:
         results = []
@@ -65,19 +67,23 @@ class RecallEngine:
         return scored[:top_k]
 
     def _middle_brain(self, query: str, top_k: int) -> List[RecallResult]:
-        if not self.store or not hasattr(self.store, "search_by_embedding"):
+        if not self.vector_store or not self.embed_fn:
             return []
 
-        results = self.store.search_by_embedding(query, top_k)
-        return [
-            RecallResult(
-                cell_id=r.get("id", ""),
-                content=r.get("content", ""),
-                score=r.get("score", 0.0),
-                source="middle",
-            )
-            for r in results
-        ]
+        try:
+            query_embedding = self.embed_fn(query)
+            results = self.vector_store.search(query_embedding, top_k=top_k)
+            return [
+                RecallResult(
+                    cell_id=r.get("id", ""),
+                    content=r.get("content", ""),
+                    score=r.get("score", 0.0),
+                    source="middle",
+                )
+                for r in results
+            ]
+        except Exception:
+            return []
 
     def _merge_and_rerank(self, results: List[RecallResult], top_k: int) -> List[RecallResult]:
         seen = {}
