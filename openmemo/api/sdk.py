@@ -5,14 +5,20 @@ Usage:
     from openmemo import Memory
 
     memory = Memory()
-    memory.add("User prefers dark mode", agent_id="agent_1", scene="preferences")
+    memory.write("User prefers dark mode", agent_id="agent_1", scene="preferences")
     results = memory.recall("user preference", agent_id="agent_1")
     print(results)
+
+    # Or use MemoryClient alias
+    from openmemo import MemoryClient
+    mem = MemoryClient()
+    mem.write("User prefers Python")
+    mem.recall("Which language?")
 """
 
 import uuid
 import time
-from typing import List, Optional, Callable
+from typing import List, Optional, Callable, Union
 
 from openmemo.config import OpenMemoConfig
 from openmemo.core.memory import Note
@@ -71,6 +77,14 @@ class Memory:
         self.conflict_detector = ConflictDetector(config=self._config.governance)
         self.version_manager = VersionManager()
 
+    def write(self, content: str, agent_id: str = "", scene: str = "",
+              cell_type: str = "fact", source: str = "manual",
+              metadata: dict = None) -> str:
+        return self.add(
+            content=content, source=source, agent_id=agent_id,
+            scene=scene, cell_type=cell_type, metadata=metadata,
+        )
+
     def add(self, content: str, source: str = "manual", agent_id: str = "",
             scene: str = "", cell_type: str = "fact", metadata: dict = None) -> str:
         from openmemo._internal import get_evolution_params
@@ -113,7 +127,39 @@ class Memory:
         return note.id
 
     def recall(self, query: str, agent_id: str = "", scene: str = "",
-               top_k: int = 10, budget: int = 2000) -> List[dict]:
+               mode: str = "kv", top_k: int = None, limit: int = None,
+               budget: int = 2000) -> Union[dict, List[dict]]:
+        effective_limit = limit or top_k or 10
+
+        if mode == "narrative":
+            result = self.reconstructor.reconstruct(
+                query, max_sources=effective_limit,
+                agent_id=agent_id or None,
+            )
+            return {
+                "memory_story": result.narrative,
+                "sources": result.sources,
+                "confidence": result.confidence,
+            }
+
+        results = self.recall_engine.recall(
+            query, top_k=effective_limit, budget=budget,
+            agent_id=agent_id or None, scene=scene or None,
+        )
+
+        for r in results:
+            cell = self.store.get_cell(r.cell_id)
+            if cell:
+                cell_obj = MemCell.from_dict(cell)
+                cell_obj.access()
+                self.store.put_cell(cell_obj.to_dict())
+
+        return {
+            "memories": [r.content for r in results],
+        }
+
+    def recall_raw(self, query: str, agent_id: str = "", scene: str = "",
+                   top_k: int = 10, budget: int = 2000) -> List[dict]:
         results = self.recall_engine.recall(
             query, top_k=top_k, budget=budget,
             agent_id=agent_id or None, scene=scene or None,
@@ -136,9 +182,11 @@ class Memory:
             for r in results
         ]
 
-    def search(self, query: str, agent_id: str = "", top_k: int = 10) -> List[dict]:
+    def search(self, query: str, agent_id: str = "",
+               top_k: int = None, limit: int = None) -> List[dict]:
+        effective_limit = limit or top_k or 10
         results = self.recall_engine.recall(
-            query, top_k=top_k, budget=50000,
+            query, top_k=effective_limit, budget=50000,
             agent_id=agent_id or None,
         )
         return [
@@ -149,6 +197,14 @@ class Memory:
             }
             for r in results
         ]
+
+    def context(self, query: str, agent_id: str = "", scene: str = "",
+                limit: int = 3) -> List[str]:
+        results = self.recall_engine.recall(
+            query, top_k=limit, budget=2000,
+            agent_id=agent_id or None, scene=scene or None,
+        )
+        return [r.content for r in results]
 
     def reconstruct(self, query: str, agent_id: str = "", max_sources: int = 10) -> dict:
         result = self.reconstructor.reconstruct(
@@ -162,7 +218,11 @@ class Memory:
             "confidence": result.confidence,
         }
 
-    def scenes(self, agent_id: str = "") -> List[dict]:
+    def scenes(self, agent_id: str = "") -> List[str]:
+        raw_scenes = self.store.list_scenes(agent_id=agent_id or None)
+        return [s.get("title", "") for s in raw_scenes if s.get("title")]
+
+    def scenes_detail(self, agent_id: str = "") -> List[dict]:
         return self.store.list_scenes(agent_id=agent_id or None)
 
     def delete(self, memory_id: str) -> bool:
@@ -226,3 +286,6 @@ class Memory:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+
+
+MemoryClient = Memory

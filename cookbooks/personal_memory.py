@@ -9,72 +9,41 @@ Usage:
     python cookbooks/personal_memory.py
 """
 
-from openmemo import Memory
+from openmemo import MemoryClient
 
-memory = Memory(db_path="personal_memory.db")
+mem = MemoryClient(db_path="personal_memory.db")
 
 AGENT_ID = "personal_assistant"
 
-memory.add(
-    "User's name is Alex",
-    agent_id=AGENT_ID,
-    scene="identity",
-    cell_type="fact",
-)
+mem.write("User's name is Alex", agent_id=AGENT_ID, scene="identity", cell_type="fact")
+mem.write("Alex prefers dark mode in all applications", agent_id=AGENT_ID, scene="preferences", cell_type="preference")
+mem.write("Alex is learning Rust programming language", agent_id=AGENT_ID, scene="goals", cell_type="observation")
+mem.write("Alex decided to wake up at 6am every day", agent_id=AGENT_ID, scene="goals", cell_type="decision")
+mem.write("Alex doesn't like receiving notifications after 10pm", agent_id=AGENT_ID, scene="preferences", cell_type="constraint")
+mem.write("Alex mentioned being interested in machine learning", agent_id=AGENT_ID, scene="interests", cell_type="observation")
 
-memory.add(
-    "Alex prefers dark mode in all applications",
-    agent_id=AGENT_ID,
-    scene="preferences",
-    cell_type="preference",
-)
+print("=== KV Recall: Alex's preferences ===")
+result = mem.recall("Alex preferences", agent_id=AGENT_ID, mode="kv")
+for m in result["memories"]:
+    print(f"  - {m}")
 
-memory.add(
-    "Alex is learning Rust programming language",
-    agent_id=AGENT_ID,
-    scene="goals",
-    cell_type="observation",
-)
+print("\n=== Narrative Recall: Alex's goals ===")
+result = mem.recall("What are Alex's goals?", agent_id=AGENT_ID, mode="narrative")
+print(f"  {result['memory_story']}")
+print(f"  Confidence: {result['confidence']:.2f}")
 
-memory.add(
-    "Alex decided to wake up at 6am every day",
-    agent_id=AGENT_ID,
-    scene="goals",
-    cell_type="decision",
-)
+print("\n=== Agent Context: for prompt injection ===")
+context = mem.context("What does Alex like?", agent_id=AGENT_ID, limit=3)
+for c in context:
+    print(f"  - {c}")
 
-memory.add(
-    "Alex doesn't like receiving notifications after 10pm",
-    agent_id=AGENT_ID,
-    scene="preferences",
-    cell_type="constraint",
-)
-
-memory.add(
-    "Alex mentioned being interested in machine learning",
-    agent_id=AGENT_ID,
-    scene="interests",
-    cell_type="observation",
-)
-
-print("=== What do we know about Alex's preferences? ===")
-results = memory.recall("Alex preferences", agent_id=AGENT_ID)
-for r in results:
-    print(f"  [{r['score']:.2f}] {r['content']}")
-
-print("\n=== Reconstruct: Alex's goals ===")
-reconstruction = memory.reconstruct("What are Alex's goals?", agent_id=AGENT_ID)
-print(f"  Narrative:\n{reconstruction['narrative']}")
-print(f"  Confidence: {reconstruction['confidence']:.2f}")
-print(f"  Sources: {len(reconstruction['sources'])}")
-
-print("\n=== Memory scenes ===")
-scenes = memory.scenes(agent_id=AGENT_ID)
+print("\n=== Scenes ===")
+scenes = mem.scenes(agent_id=AGENT_ID)
 for s in scenes:
-    print(f"  - {s['title']}")
+    print(f"  - {s}")
 
-stats = memory.stats()
+stats = mem.stats()
 print(f"\n=== Stats: {stats['cells']} memories across {stats['scenes']} scenes ===")
 
-memory.close()
+mem.close()
 print("\nDone!")

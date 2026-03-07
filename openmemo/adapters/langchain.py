@@ -4,33 +4,52 @@ LangChain Adapter for OpenMemo.
 Provides OpenMemoMemory() that works as a LangChain
 BaseMemory compatible memory backend.
 
-Usage:
-    from openmemo.adapters.langchain import OpenMemoMemory
+Supports both local SDK and remote API modes.
 
+Usage (local):
+    from openmemo.adapters.langchain import OpenMemoMemory
     memory = OpenMemoMemory(agent_id="my_agent")
-    memory.save_context({"input": "hello"}, {"output": "hi"})
-    history = memory.load_memory_variables({"input": "greeting"})
+
+Usage (remote):
+    from openmemo.adapters.langchain import OpenMemoMemory
+    memory = OpenMemoMemory(
+        agent_id="my_agent",
+        base_url="https://api.openmemo.ai",
+    )
 """
 
 from typing import Any, Dict, List
-from openmemo.api.sdk import Memory
 
 
 class OpenMemoMemory:
     """
     LangChain-compatible memory backend powered by OpenMemo.
 
-    Stores conversation context as memories and retrieves
-    relevant context on each interaction.
+    Args:
+        db_path: Local database path (local mode only). Default: "openmemo.db"
+        agent_id: Agent identifier for memory isolation.
+        memory: Pre-configured Memory or RemoteMemory instance.
+        memory_key: Key used in LangChain memory variables. Default: "history"
+        base_url: Remote API URL. If provided, uses remote mode.
+        api_key: API key for remote authentication (future use).
     """
 
     memory_key: str = "history"
 
     def __init__(self, db_path: str = "openmemo.db", agent_id: str = "",
-                 memory: Memory = None, memory_key: str = "history"):
-        self._memory = memory or Memory(db_path=db_path)
+                 memory=None, memory_key: str = "history",
+                 base_url: str = None, api_key: str = None):
         self.agent_id = agent_id
         self.memory_key = memory_key
+
+        if memory:
+            self._memory = memory
+        elif base_url:
+            from openmemo.api.remote import RemoteMemory
+            self._memory = RemoteMemory(base_url=base_url, api_key=api_key)
+        else:
+            from openmemo.api.sdk import Memory
+            self._memory = Memory(db_path=db_path)
 
     @property
     def memory_variables(self) -> List[str]:
@@ -41,24 +60,23 @@ class OpenMemoMemory:
         if not query:
             return {self.memory_key: ""}
 
-        results = self._memory.recall(
+        context = self._memory.context(
             query=query,
             agent_id=self.agent_id,
-            top_k=5,
+            limit=5,
         )
 
-        if not results:
+        if not context:
             return {self.memory_key: ""}
 
-        context = "\n".join(r["content"] for r in results)
-        return {self.memory_key: context}
+        return {self.memory_key: "\n".join(context)}
 
     def save_context(self, inputs: Dict[str, Any], outputs: Dict[str, str]) -> None:
         user_input = inputs.get("input", "")
         ai_output = outputs.get("output", "")
 
         if user_input:
-            self._memory.add(
+            self._memory.write(
                 content=f"User: {user_input}",
                 agent_id=self.agent_id,
                 scene="conversation",
@@ -66,7 +84,7 @@ class OpenMemoMemory:
             )
 
         if ai_output:
-            self._memory.add(
+            self._memory.write(
                 content=f"Assistant: {ai_output}",
                 agent_id=self.agent_id,
                 scene="conversation",
@@ -75,3 +93,7 @@ class OpenMemoMemory:
 
     def clear(self) -> None:
         pass
+
+    def close(self):
+        if hasattr(self._memory, 'close'):
+            self._memory.close()

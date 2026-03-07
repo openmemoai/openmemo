@@ -9,70 +9,80 @@ Usage:
     python cookbooks/coding_assistant.py
 """
 
-from openmemo import Memory
+from openmemo import MemoryClient
 
-memory = Memory(db_path="coding_assistant.db")
+mem = MemoryClient(db_path="coding_assistant.db")
 
-memory.add(
+mem.write(
     "User prefers Python 3.11 with type hints",
     agent_id="coding_agent",
     scene="preferences",
     cell_type="preference",
 )
 
-memory.add(
+mem.write(
     "Project uses Flask for backend API",
     agent_id="coding_agent",
     scene="project_setup",
     cell_type="fact",
 )
 
-memory.add(
+mem.write(
     "Use PostgreSQL in production, SQLite in development",
     agent_id="coding_agent",
     scene="project_setup",
     cell_type="decision",
 )
 
-memory.add(
+mem.write(
     "Always run tests before committing",
     agent_id="coding_agent",
     scene="workflow",
     cell_type="constraint",
 )
 
-memory.add(
+mem.write(
     "User struggled with async code yesterday",
     agent_id="coding_agent",
     scene="observations",
     cell_type="observation",
 )
 
-results = memory.recall(
+result = mem.recall(
     "What database should I use?",
     agent_id="coding_agent",
+    mode="kv",
 )
-print("=== Recall: database preference ===")
-for r in results:
-    print(f"  [{r['score']:.2f}] {r['content']}")
+print("=== Recall (KV mode): database preference ===")
+for m in result["memories"]:
+    print(f"  - {m}")
 
-results = memory.recall(
+result = mem.recall(
     "What are the project constraints?",
     agent_id="coding_agent",
     scene="workflow",
+    mode="narrative",
 )
-print("\n=== Recall: workflow constraints ===")
-for r in results:
-    print(f"  [{r['score']:.2f}] {r['content']}")
+print("\n=== Recall (Narrative mode): workflow constraints ===")
+print(f"  {result['memory_story']}")
 
-scenes = memory.scenes(agent_id="coding_agent")
+context = mem.context(
+    "deploy application",
+    agent_id="coding_agent",
+    limit=3,
+)
+print(f"\n=== Agent Context (for prompt injection) ===")
+for c in context:
+    print(f"  - {c}")
+
+scenes = mem.scenes(agent_id="coding_agent")
 print(f"\n=== Scenes ({len(scenes)}) ===")
 for s in scenes:
-    print(f"  - {s['title']} ({len(s.get('cell_ids', []))} memories)")
+    print(f"  - {s}")
 
-stats = memory.stats()
+stats = mem.stats()
 print(f"\n=== Stats ===")
 print(f"  Notes: {stats['notes']}, Cells: {stats['cells']}, Scenes: {stats['scenes']}")
 
-memory.close()
+mem.close()
 print("\nDone!")

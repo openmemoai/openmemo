@@ -2,34 +2,54 @@
 OpenClaw Adapter for OpenMemo.
 
 Provides a memory backend for OpenClaw agent sessions.
+Supports both local SDK and remote API modes.
 
-Usage:
+Usage (local):
     from openmemo.adapters.openclaw import OpenClawMemoryBackend
-
     backend = OpenClawMemoryBackend(agent_id="claw_agent")
-    backend.write("User prefers Python")
-    context = backend.recall("programming language")
+
+Usage (remote):
+    from openmemo.adapters.openclaw import OpenClawMemoryBackend
+    backend = OpenClawMemoryBackend(
+        agent_id="claw_agent",
+        base_url="https://api.openmemo.ai",
+    )
 """
 
 from typing import List, Dict
-from openmemo.api.sdk import Memory
 
 
 class OpenClawMemoryBackend:
     """
     OpenClaw memory_backend=openmemo integration.
 
-    Automatically writes session data and recalls
-    relevant memory for each interaction.
+    Supports two modes:
+    - Local: Uses embedded SQLite via Memory SDK (default)
+    - Remote: Calls OpenMemo REST API via RemoteMemory
+
+    Args:
+        db_path: Local database path (local mode only). Default: "openmemo.db"
+        agent_id: Agent identifier for memory isolation.
+        memory: Pre-configured Memory or RemoteMemory instance.
+        base_url: Remote API URL. If provided, uses remote mode.
+        api_key: API key for remote authentication (future use).
     """
 
     def __init__(self, db_path: str = "openmemo.db", agent_id: str = "",
-                 memory: Memory = None):
-        self._memory = memory or Memory(db_path=db_path)
+                 memory=None, base_url: str = None, api_key: str = None):
         self.agent_id = agent_id
 
+        if memory:
+            self._memory = memory
+        elif base_url:
+            from openmemo.api.remote import RemoteMemory
+            self._memory = RemoteMemory(base_url=base_url, api_key=api_key)
+        else:
+            from openmemo.api.sdk import Memory
+            self._memory = Memory(db_path=db_path)
+
     def write(self, content: str, scene: str = "", cell_type: str = "fact") -> str:
-        return self._memory.add(
+        return self._memory.write(
             content=content,
             agent_id=self.agent_id,
             scene=scene,
@@ -37,25 +57,31 @@ class OpenClawMemoryBackend:
             source="openclaw",
         )
 
-    def recall(self, query: str, scene: str = "", top_k: int = 10) -> List[Dict]:
+    def recall(self, query: str, scene: str = "", mode: str = "kv",
+               limit: int = 10) -> dict:
         return self._memory.recall(
             query=query,
             agent_id=self.agent_id,
             scene=scene,
-            top_k=top_k,
+            mode=mode,
+            limit=limit,
         )
 
-    def search(self, query: str, top_k: int = 10) -> List[Dict]:
+    def search(self, query: str, limit: int = 10) -> List[Dict]:
         return self._memory.search(
             query=query,
             agent_id=self.agent_id,
-            top_k=top_k,
+            limit=limit,
         )
 
-    def get_context(self, query: str, max_tokens: int = 2000) -> str:
-        results = self._memory.recall(
+    def get_context(self, query: str, scene: str = "", limit: int = 3) -> List[str]:
+        return self._memory.context(
             query=query,
             agent_id=self.agent_id,
-            budget=max_tokens,
+            scene=scene,
+            limit=limit,
         )
-        return "\n".join(r["content"] for r in results)
+
+    def close(self):
+        if hasattr(self._memory, 'close'):
+            self._memory.close()

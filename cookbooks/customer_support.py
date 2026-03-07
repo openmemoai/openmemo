@@ -9,76 +9,77 @@ Usage:
     python cookbooks/customer_support.py
 """
 
-from openmemo import Memory
+from openmemo import MemoryClient
 
-memory = Memory(db_path="support_agent.db")
+mem = MemoryClient(db_path="support_agent.db")
 
 AGENT_ID = "support_agent"
 
-memory.add(
+mem.write(
     "Customer John (ID: C-1001) prefers email communication",
     agent_id=AGENT_ID,
     scene="customer_c1001",
     cell_type="preference",
 )
 
-memory.add(
+mem.write(
     "John reported login issues on 2024-01-15, resolved by resetting password",
     agent_id=AGENT_ID,
     scene="customer_c1001",
     cell_type="fact",
 )
 
-memory.add(
+mem.write(
     "John is on the Pro plan, renewed last month",
     agent_id=AGENT_ID,
     scene="customer_c1001",
     cell_type="fact",
 )
 
-memory.add(
+mem.write(
     "Customer Sarah (ID: C-1002) prefers phone support",
     agent_id=AGENT_ID,
     scene="customer_c1002",
     cell_type="preference",
 )
 
-memory.add(
+mem.write(
     "Sarah had billing dispute in December, issued $50 credit",
     agent_id=AGENT_ID,
     scene="customer_c1002",
     cell_type="decision",
 )
 
-memory.add(
+mem.write(
     "Do not offer more than $100 credit without manager approval",
     agent_id=AGENT_ID,
     scene="policies",
     cell_type="constraint",
 )
 
-print("=== Looking up John's history ===")
-results = memory.recall(
+print("=== Looking up John's history (KV mode) ===")
+result = mem.recall(
     "What issues has John had?",
     agent_id=AGENT_ID,
     scene="customer_c1001",
+    mode="kv",
 )
-for r in results:
-    print(f"  [{r['score']:.2f}] {r['content']}")
+for m in result["memories"]:
+    print(f"  - {m}")
 
 print("\n=== Checking credit policies ===")
-results = memory.recall(
+context = mem.context(
     "credit limit policy",
     agent_id=AGENT_ID,
-    scene="policies",
+    limit=3,
 )
-for r in results:
-    print(f"  [{r['score']:.2f}] {r['content']}")
+for c in context:
+    print(f"  - {c}")
 
-print("\n=== All customer scenes ===")
-scenes = memory.scenes(agent_id=AGENT_ID)
+print("\n=== All scenes ===")
+scenes = mem.scenes(agent_id=AGENT_ID)
 for s in scenes:
-    print(f"  - {s['title']} ({len(s.get('cell_ids', []))} items)")
+    print(f"  - {s}")
 
-memory.close()
+mem.close()
 print("\nDone!")

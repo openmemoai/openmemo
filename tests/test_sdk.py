@@ -1,7 +1,7 @@
 import pytest
 import os
 import tempfile
-from openmemo import Memory
+from openmemo import Memory, MemoryClient
 
 
 @pytest.fixture
@@ -20,16 +20,44 @@ class TestMemorySDK:
         assert note_id is not None
         assert len(note_id) > 0
 
-    def test_add_and_recall(self, memory):
-        memory.add("User prefers dark mode")
-        memory.add("Project uses Python 3.11")
-        results = memory.recall("dark mode")
-        assert len(results) > 0
-        assert any("dark mode" in r["content"] for r in results)
+    def test_write_alias(self, memory):
+        note_id = memory.write("test content via write")
+        assert note_id is not None
 
-    def test_recall_returns_dicts(self, memory):
-        memory.add("test content")
-        results = memory.recall("test")
+    def test_memory_client_alias(self):
+        assert MemoryClient is Memory
+
+    def test_recall_kv_mode(self, memory):
+        memory.write("User prefers dark mode")
+        memory.write("Project uses Python 3.11")
+        result = memory.recall("dark mode", mode="kv")
+        assert "memories" in result
+        assert isinstance(result["memories"], list)
+        assert any("dark mode" in m for m in result["memories"])
+
+    def test_recall_narrative_mode(self, memory):
+        memory.write("Python is great")
+        memory.write("JavaScript is popular")
+        result = memory.recall("programming languages", mode="narrative")
+        assert "memory_story" in result
+        assert "sources" in result
+        assert "confidence" in result
+        assert isinstance(result["memory_story"], str)
+
+    def test_recall_default_is_kv(self, memory):
+        memory.write("test content")
+        result = memory.recall("test")
+        assert "memories" in result
+
+    def test_recall_with_limit(self, memory):
+        for i in range(5):
+            memory.write(f"Memory item {i} about coding")
+        result = memory.recall("coding", limit=2)
+        assert len(result["memories"]) <= 2
+
+    def test_recall_raw(self, memory):
+        memory.write("test content")
+        results = memory.recall_raw("test")
         assert isinstance(results, list)
         if results:
             r = results[0]
@@ -38,9 +66,16 @@ class TestMemorySDK:
             assert "source" in r
             assert "cell_id" in r
 
+    def test_context(self, memory):
+        memory.write("User prefers dark mode", agent_id="a1", scene="prefs")
+        memory.write("Deploy on AWS", agent_id="a1", scene="infra")
+        context = memory.context("user preference", agent_id="a1", limit=3)
+        assert isinstance(context, list)
+        assert all(isinstance(c, str) for c in context)
+
     def test_reconstruct(self, memory):
-        memory.add("Python is great")
-        memory.add("JavaScript is popular")
+        memory.write("Python is great")
+        memory.write("JavaScript is popular")
         result = memory.reconstruct("programming languages")
         assert "query" in result
         assert "narrative" in result
@@ -49,15 +84,15 @@ class TestMemorySDK:
 
     def test_maintain(self, memory):
         for i in range(10):
-            memory.add(f"Memory entry {i}")
+            memory.write(f"Memory entry {i}")
         result = memory.maintain()
         assert "pyramid" in result
         assert "total_cells" in result
         assert result["total_cells"] == 10
 
     def test_stats(self, memory):
-        memory.add("one")
-        memory.add("two")
+        memory.write("one")
+        memory.write("two")
         stats = memory.stats()
         assert stats["notes"] == 2
         assert stats["cells"] == 2
@@ -67,14 +102,14 @@ class TestMemorySDK:
         fd, path = tempfile.mkstemp(suffix=".db")
         os.close(fd)
         with Memory(db_path=path) as m:
-            m.add("context manager test")
+            m.write("context manager test")
             stats = m.stats()
             assert stats["notes"] == 1
         os.remove(path)
 
     def test_conflict_detection(self, memory):
-        memory.add("User prefers dark mode")
-        memory.add("User dislikes dark mode")
+        memory.write("User prefers dark mode")
+        memory.write("User dislikes dark mode")
         stats = memory.stats()
         assert stats["unresolved_conflicts"] >= 1
 
@@ -89,56 +124,68 @@ class TestMemorySDK:
                     1.0 if "rust" in words else 0.0]
 
         m = Memory(db_path=path, embed_fn=simple_embed)
-        m.add("Python is great")
-        m.add("Java is popular")
-        results = m.recall("Python programming")
-        assert len(results) > 0
+        m.write("Python is great")
+        m.write("Java is popular")
+        result = m.recall("Python programming")
+        assert len(result["memories"]) > 0
         m.close()
         os.remove(path)
 
     def test_add_with_agent_id(self, memory):
-        memory.add("fact for agent A", agent_id="agent_a")
-        memory.add("fact for agent B", agent_id="agent_b")
-        results = memory.recall("fact", agent_id="agent_a")
-        assert len(results) >= 1
-        assert all("agent A" in r["content"] or "fact" in r["content"] for r in results)
+        memory.write("fact for agent A", agent_id="agent_a")
+        memory.write("fact for agent B", agent_id="agent_b")
+        result = memory.recall("fact", agent_id="agent_a")
+        assert len(result["memories"]) >= 1
 
     def test_add_with_scene(self, memory):
-        memory.add("coding preference", agent_id="a1", scene="coding")
-        memory.add("food preference", agent_id="a1", scene="personal")
-        results = memory.recall("preference", agent_id="a1", scene="coding")
-        assert len(results) >= 1
+        memory.write("coding preference", agent_id="a1", scene="coding")
+        memory.write("food preference", agent_id="a1", scene="personal")
+        result = memory.recall("preference", agent_id="a1", scene="coding")
+        assert len(result["memories"]) >= 1
 
     def test_add_with_cell_type(self, memory):
-        memory.add("user prefers Python", cell_type="preference")
-        memory.add("must use HTTPS", cell_type="constraint")
-        memory.add("chose Flask over Django", cell_type="decision")
+        memory.write("user prefers Python", cell_type="preference")
+        memory.write("must use HTTPS", cell_type="constraint")
+        memory.write("chose Flask over Django", cell_type="decision")
         stats = memory.stats()
         assert stats["cells"] == 3
 
-    def test_scenes(self, memory):
-        memory.add("item 1", agent_id="a1", scene="work")
-        memory.add("item 2", agent_id="a1", scene="personal")
+    def test_scenes_returns_names(self, memory):
+        memory.write("item 1", agent_id="a1", scene="work")
+        memory.write("item 2", agent_id="a1", scene="personal")
         scenes = memory.scenes(agent_id="a1")
+        assert isinstance(scenes, list)
         assert len(scenes) == 2
-        titles = [s["title"] for s in scenes]
-        assert "work" in titles
-        assert "personal" in titles
+        assert "work" in scenes
+        assert "personal" in scenes
+
+    def test_scenes_detail(self, memory):
+        memory.write("item 1", agent_id="a1", scene="work")
+        scenes = memory.scenes_detail(agent_id="a1")
+        assert isinstance(scenes, list)
+        assert len(scenes) == 1
+        assert "title" in scenes[0]
+        assert "cell_ids" in scenes[0]
 
     def test_delete(self, memory):
-        note_id = memory.add("to be deleted")
-        stats_before = memory.stats()
+        memory.write("to be deleted")
         cells = memory.store.list_cells()
         cell_id = cells[0]["id"]
         deleted = memory.delete(cell_id)
         assert deleted is True
 
     def test_search(self, memory):
-        memory.add("Python is great for ML")
-        memory.add("JavaScript for web")
+        memory.write("Python is great for ML")
+        memory.write("JavaScript for web")
         results = memory.search("Python")
         assert isinstance(results, list)
         if results:
             assert "content" in results[0]
             assert "score" in results[0]
             assert "cell_id" in results[0]
+
+    def test_search_with_limit(self, memory):
+        for i in range(5):
+            memory.write(f"Item {i} about testing")
+        results = memory.search("testing", limit=2)
+        assert len(results) <= 2

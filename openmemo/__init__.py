@@ -5,9 +5,10 @@ Provides structured, evolving, and long-term memory
 for autonomous AI systems.
 """
 
-from openmemo.api.sdk import Memory
+from openmemo.api.sdk import Memory, MemoryClient
+from openmemo.api.remote import RemoteMemory
 from openmemo.config import OpenMemoConfig
 from openmemo.core.memcell import CellType
 
-__version__ = "0.3.0"
-__all__ = ["Memory", "OpenMemoConfig", "CellType"]
+__version__ = "0.4.0"
+__all__ = ["Memory", "MemoryClient", "RemoteMemory", "OpenMemoConfig", "CellType"]
