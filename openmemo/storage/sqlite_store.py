@@ -26,6 +26,8 @@ class SQLiteStore(BaseStore):
                 id TEXT PRIMARY KEY,
                 content TEXT NOT NULL,
                 source TEXT DEFAULT 'manual',
+                agent_id TEXT DEFAULT '',
+                scene TEXT DEFAULT '',
                 timestamp REAL,
                 metadata TEXT DEFAULT '{}'
             );
@@ -34,12 +36,15 @@ class SQLiteStore(BaseStore):
                 id TEXT PRIMARY KEY,
                 note_id TEXT,
                 content TEXT NOT NULL,
+                cell_type TEXT DEFAULT 'fact',
                 facts TEXT DEFAULT '[]',
                 stage TEXT DEFAULT 'exploration',
                 importance REAL DEFAULT 0.5,
                 access_count INTEGER DEFAULT 0,
                 last_accessed REAL,
                 created_at REAL,
+                agent_id TEXT DEFAULT '',
+                scene TEXT DEFAULT '',
                 connections TEXT DEFAULT '[]',
                 metadata TEXT DEFAULT '{}'
             );
@@ -50,6 +55,7 @@ class SQLiteStore(BaseStore):
                 summary TEXT,
                 cell_ids TEXT DEFAULT '[]',
                 theme TEXT,
+                agent_id TEXT DEFAULT '',
                 created_at REAL,
                 updated_at REAL,
                 metadata TEXT DEFAULT '{}'
@@ -76,13 +82,31 @@ class SQLiteStore(BaseStore):
             );
         """)
         self.conn.commit()
+        self._migrate()
+
+    def _migrate(self):
+        cursor = self.conn.cursor()
+        for table, col, col_def in [
+            ("notes", "agent_id", "TEXT DEFAULT ''"),
+            ("notes", "scene", "TEXT DEFAULT ''"),
+            ("cells", "agent_id", "TEXT DEFAULT ''"),
+            ("cells", "scene", "TEXT DEFAULT ''"),
+            ("cells", "cell_type", "TEXT DEFAULT 'fact'"),
+            ("scenes", "agent_id", "TEXT DEFAULT ''"),
+        ]:
+            try:
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_def}")
+            except sqlite3.OperationalError:
+                pass
+        self.conn.commit()
 
     def put_note(self, note: dict) -> str:
         note_id = note.get("id", "")
         cursor = self.conn.cursor()
         cursor.execute(
-            "INSERT OR REPLACE INTO notes (id, content, source, timestamp, metadata) VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO notes (id, content, source, agent_id, scene, timestamp, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (note_id, note.get("content", ""), note.get("source", "manual"),
+             note.get("agent_id", ""), note.get("scene", ""),
              note.get("timestamp", 0), json.dumps(note.get("metadata", {})))
         )
         self.conn.commit()
@@ -96,9 +120,13 @@ class SQLiteStore(BaseStore):
             return None
         return self._row_to_note(row)
 
-    def list_notes(self, limit: int = 100, offset: int = 0) -> List[dict]:
+    def list_notes(self, limit: int = 100, offset: int = 0, agent_id: str = None) -> List[dict]:
         cursor = self.conn.cursor()
-        cursor.execute("SELECT * FROM notes ORDER BY timestamp DESC LIMIT ? OFFSET ?", (limit, offset))
+        if agent_id:
+            cursor.execute("SELECT * FROM notes WHERE agent_id = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+                           (agent_id, limit, offset))
+        else:
+            cursor.execute("SELECT * FROM notes ORDER BY timestamp DESC LIMIT ? OFFSET ?", (limit, offset))
         return [self._row_to_note(row) for row in cursor.fetchall()]
 
     def delete_note(self, note_id: str) -> bool:
@@ -112,12 +140,15 @@ class SQLiteStore(BaseStore):
         cursor = self.conn.cursor()
         cursor.execute(
             """INSERT OR REPLACE INTO cells
-            (id, note_id, content, facts, stage, importance, access_count, last_accessed, created_at, connections, metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (id, note_id, content, cell_type, facts, stage, importance, access_count,
+             last_accessed, created_at, agent_id, scene, connections, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (cell_id, cell.get("note_id", ""), cell.get("content", ""),
+             cell.get("cell_type", "fact"),
              json.dumps(cell.get("facts", [])), cell.get("stage", "exploration"),
              cell.get("importance", 0.5), cell.get("access_count", 0),
              cell.get("last_accessed", 0), cell.get("created_at", 0),
+             cell.get("agent_id", ""), cell.get("scene", ""),
              json.dumps(cell.get("connections", [])), json.dumps(cell.get("metadata", {})))
         )
         self.conn.commit()
@@ -131,20 +162,39 @@ class SQLiteStore(BaseStore):
             return None
         return self._row_to_cell(row)
 
-    def list_cells(self, limit: int = 100, offset: int = 0) -> List[dict]:
+    def list_cells(self, limit: int = 100, offset: int = 0,
+                   agent_id: str = None, scene: str = None) -> List[dict]:
         cursor = self.conn.cursor()
-        cursor.execute("SELECT * FROM cells ORDER BY created_at DESC LIMIT ? OFFSET ?", (limit, offset))
+        conditions = []
+        params = []
+        if agent_id:
+            conditions.append("agent_id = ?")
+            params.append(agent_id)
+        if scene:
+            conditions.append("scene = ?")
+            params.append(scene)
+
+        where = " WHERE " + " AND ".join(conditions) if conditions else ""
+        params.extend([limit, offset])
+        cursor.execute(f"SELECT * FROM cells{where} ORDER BY created_at DESC LIMIT ? OFFSET ?", params)
         return [self._row_to_cell(row) for row in cursor.fetchall()]
+
+    def delete_cell(self, cell_id: str) -> bool:
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM cells WHERE id = ?", (cell_id,))
+        self.conn.commit()
+        return cursor.rowcount > 0
 
     def put_scene(self, scene: dict) -> str:
         scene_id = scene.get("id", "")
         cursor = self.conn.cursor()
         cursor.execute(
             """INSERT OR REPLACE INTO scenes
-            (id, title, summary, cell_ids, theme, created_at, updated_at, metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (id, title, summary, cell_ids, theme, agent_id, created_at, updated_at, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (scene_id, scene.get("title", ""), scene.get("summary", ""),
              json.dumps(scene.get("cell_ids", [])), scene.get("theme", ""),
+             scene.get("agent_id", ""),
              scene.get("created_at", 0), scene.get("updated_at", 0),
              json.dumps(scene.get("metadata", {})))
         )
@@ -159,9 +209,13 @@ class SQLiteStore(BaseStore):
             return None
         return self._row_to_scene(row)
 
-    def list_scenes(self, limit: int = 100, offset: int = 0) -> List[dict]:
+    def list_scenes(self, limit: int = 100, offset: int = 0, agent_id: str = None) -> List[dict]:
         cursor = self.conn.cursor()
-        cursor.execute("SELECT * FROM scenes ORDER BY updated_at DESC LIMIT ? OFFSET ?", (limit, offset))
+        if agent_id:
+            cursor.execute("SELECT * FROM scenes WHERE agent_id = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+                           (agent_id, limit, offset))
+        else:
+            cursor.execute("SELECT * FROM scenes ORDER BY updated_at DESC LIMIT ? OFFSET ?", (limit, offset))
         return [self._row_to_scene(row) for row in cursor.fetchall()]
 
     def put_skill(self, skill: dict) -> str:
@@ -188,13 +242,20 @@ class SQLiteStore(BaseStore):
         self.conn.close()
 
     def _row_to_note(self, row) -> dict:
-        return {
+        d = {
             "id": row["id"], "content": row["content"], "source": row["source"],
             "timestamp": row["timestamp"], "metadata": json.loads(row["metadata"] or "{}"),
         }
+        try:
+            d["agent_id"] = row["agent_id"] or ""
+            d["scene"] = row["scene"] or ""
+        except (IndexError, KeyError):
+            d["agent_id"] = ""
+            d["scene"] = ""
+        return d
 
     def _row_to_cell(self, row) -> dict:
-        return {
+        d = {
             "id": row["id"], "note_id": row["note_id"], "content": row["content"],
             "facts": json.loads(row["facts"] or "[]"), "stage": row["stage"],
             "importance": row["importance"], "access_count": row["access_count"],
@@ -202,14 +263,28 @@ class SQLiteStore(BaseStore):
             "connections": json.loads(row["connections"] or "[]"),
             "metadata": json.loads(row["metadata"] or "{}"),
         }
+        try:
+            d["agent_id"] = row["agent_id"] or ""
+            d["scene"] = row["scene"] or ""
+            d["cell_type"] = row["cell_type"] or "fact"
+        except (IndexError, KeyError):
+            d["agent_id"] = ""
+            d["scene"] = ""
+            d["cell_type"] = "fact"
+        return d
 
     def _row_to_scene(self, row) -> dict:
-        return {
+        d = {
             "id": row["id"], "title": row["title"], "summary": row["summary"],
             "cell_ids": json.loads(row["cell_ids"] or "[]"), "theme": row["theme"],
             "created_at": row["created_at"], "updated_at": row["updated_at"],
             "metadata": json.loads(row["metadata"] or "{}"),
         }
+        try:
+            d["agent_id"] = row["agent_id"] or ""
+        except (IndexError, KeyError):
+            d["agent_id"] = ""
+        return d
 
     def _row_to_skill(self, row) -> dict:
         return {

@@ -13,17 +13,19 @@ def store_with_data():
     s = SQLiteStore(db_path=path)
 
     cells = [
-        ("c1", "Python is great for data science and machine learning"),
-        ("c2", "JavaScript dominates web development and frontend"),
-        ("c3", "Rust provides memory safety without garbage collection"),
-        ("c4", "PostgreSQL is a powerful relational database"),
-        ("c5", "Docker containers simplify deployment and operations"),
+        ("c1", "Python is great for data science and machine learning", "agent_a", "coding"),
+        ("c2", "JavaScript dominates web development and frontend", "agent_a", "coding"),
+        ("c3", "Rust provides memory safety without garbage collection", "agent_b", "coding"),
+        ("c4", "PostgreSQL is a powerful relational database", "agent_a", "infra"),
+        ("c5", "Docker containers simplify deployment and operations", "agent_b", "infra"),
     ]
-    for cid, content in cells:
+    for cid, content, aid, scene in cells:
         s.put_cell({
             "id": cid, "note_id": "", "content": content,
+            "cell_type": "fact",
             "facts": [], "stage": "exploration", "importance": 0.5,
             "access_count": 0, "last_accessed": 1.0, "created_at": 1.0,
+            "agent_id": aid, "scene": scene,
             "connections": [], "metadata": {}
         })
 
@@ -59,6 +61,21 @@ class TestRecallEngine:
         engine = RecallEngine()
         results = engine.recall("anything")
         assert results == []
+
+    def test_recall_with_agent_id(self, store_with_data):
+        engine = RecallEngine(store=store_with_data)
+        results = engine.recall("Python data science", agent_id="agent_a")
+        assert len(results) > 0
+        for r in results:
+            cell = store_with_data.get_cell(r.cell_id)
+            assert cell["agent_id"] == "agent_a"
+
+    def test_recall_with_scene(self, store_with_data):
+        engine = RecallEngine(store=store_with_data)
+        results = engine.recall("database deployment", scene="infra")
+        for r in results:
+            cell = store_with_data.get_cell(r.cell_id)
+            assert cell["scene"] == "infra"
 
 
 class TestVectorStore:

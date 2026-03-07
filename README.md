@@ -1,6 +1,6 @@
 # OpenMemo
 
-**The Memory Architecture for AI Systems.**
+**The Memory Infrastructure for AI Agents.**
 
 Most AI memory systems today are just wrappers around vector databases.
 
@@ -16,90 +16,170 @@ OpenMemo enables AI agents to remember, evolve, and reason over past experience 
 
 ---
 
-## Why Another Memory System?
+## Quickstart
 
-Most AI memory systems today work like this:
+### Install
+
+```bash
+pip install openmemo
+```
+
+### Python SDK
+
+```python
+from openmemo import Memory
+
+memory = Memory()
+
+# Write memories with agent isolation and scenes
+memory.add("User prefers PostgreSQL for production",
+           agent_id="my_agent",
+           scene="infrastructure",
+           cell_type="preference")
+
+memory.add("Always run tests before deploying",
+           agent_id="my_agent",
+           scene="workflow",
+           cell_type="constraint")
+
+# Recall with context
+results = memory.recall("database preference", agent_id="my_agent")
+for r in results:
+    print(r["content"], r["score"])
+
+# List scenes
+scenes = memory.scenes(agent_id="my_agent")
+
+# Delete a memory
+memory.delete(memory_id)
+```
+
+### REST API
+
+```bash
+# Start local server
+pip install "openmemo[server]"
+openmemo serve --port 8080
+
+# Or use the cloud API
+# Write
+curl -X POST https://api.openmemo.ai/memory/write \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "User prefers PostgreSQL",
+    "agent_id": "my_agent",
+    "scene": "infrastructure",
+    "cell_type": "preference"
+  }'
+
+# Recall
+curl -X POST https://api.openmemo.ai/memory/recall \
+  -H "Content-Type: application/json" \
+  -d '{"query": "database preference", "agent_id": "my_agent"}'
+
+# Search
+curl -X POST https://api.openmemo.ai/memory/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "database", "agent_id": "my_agent"}'
+
+# Scenes
+curl https://api.openmemo.ai/memory/scenes?agent_id=my_agent
+
+# Delete
+curl -X DELETE https://api.openmemo.ai/memory/{id}
+```
+
+### MCP Adapter (for Claude)
+
+```python
+from openmemo.adapters.mcp import OpenMemoMCPServer
+
+server = OpenMemoMCPServer()
+tools = server.get_tools()  # memory_write, memory_recall, memory_search
+result = server.handle_tool("memory_write", {"content": "User prefers Python"})
+```
+
+### LangChain Adapter
+
+```python
+from openmemo.adapters.langchain import OpenMemoMemory
+
+memory = OpenMemoMemory(agent_id="my_agent")
+memory.save_context({"input": "hello"}, {"output": "hi"})
+history = memory.load_memory_variables({"input": "greeting"})
+```
+
+---
+
+## Key Concepts
+
+### agent_id — Multi-Agent Isolation
+
+Each agent gets its own memory namespace. Memories are isolated by `agent_id`.
+
+```python
+# Agent A's memories
+memory.add("prefers Python", agent_id="agent_a")
+
+# Agent B's memories
+memory.add("prefers Rust", agent_id="agent_b")
+
+# Only returns agent_a's memories
+memory.recall("language preference", agent_id="agent_a")
+```
+
+### scene — Contextual Grouping
+
+Scenes group related memories by context. They are auto-created when you write with a `scene` parameter.
+
+```python
+memory.add("Use Flask for API", agent_id="a1", scene="project_setup")
+memory.add("Deploy to AWS", agent_id="a1", scene="infrastructure")
+
+# Filter recall by scene
+memory.recall("setup", agent_id="a1", scene="project_setup")
+```
+
+### cell_type — Typed Memory
+
+MemCells support 5 types for structured memory:
+
+| Type | Use Case |
+|------|----------|
+| `fact` | Factual information (default) |
+| `decision` | Choices and rationale |
+| `preference` | User/agent preferences |
+| `constraint` | Rules and limitations |
+| `observation` | Behavioral observations |
+
+---
+
+## Why OpenMemo?
+
+Most AI memory systems work like this:
 
 ```
 Store → Embed → Similarity Search → Inject Context
 ```
 
-This approach works for small contexts but breaks when AI systems run for long periods.
-
-Problems that appear in real systems:
+This breaks when AI systems run for long periods:
 
 - Memory becomes noisy
 - Conflicting facts accumulate
 - Context windows explode
 - Past reasoning is lost
-- Experience cannot evolve
 
-OpenMemo was built to solve these problems.
+OpenMemo solves these with a structured memory architecture:
 
----
+### MemCell — Atomic Memory
 
-## The OpenMemo Memory Model
+Each memory is a structured unit with lifecycle stages, importance scoring, and conflict detection.
 
-OpenMemo introduces a structured memory architecture.
+### MemScene — Contextual Memory
 
-Instead of treating memory as documents, OpenMemo treats memory as **cognitive units**.
+Related memories are grouped into scenes, reducing retrieval noise.
 
-```
-MemCell
-   ↓
-MemScene
-   ↓
-Memory Pyramid
-   ↓
-Reconstructive Recall
-```
-
----
-
-## MemCell — Atomic Memory
-
-MemCell is the smallest unit of memory.
-
-Each memory is structured rather than stored as raw text.
-
-```
-type: preference
-subject: user
-object: PostgreSQL
-context: production database
-confidence: 0.92
-timestamp: 2026-01-01
-```
-
-MemCell allows the system to:
-
-- Detect conflicts
-- Update beliefs
-- Track evolution
-
----
-
-## MemScene — Contextual Memory
-
-Memories rarely exist in isolation.
-
-OpenMemo groups related memories into **MemScenes**.
-
-```
-coding_scene
-research_scene
-project_scene
-```
-
-Scenes dramatically reduce retrieval noise and improve reasoning quality.
-
----
-
-## Memory Pyramid — Hierarchical Memory
-
-Long-running systems accumulate huge amounts of data.
-
-OpenMemo organizes memory hierarchically:
+### Memory Pyramid — Hierarchical Compression
 
 ```
 L0  Profile Memory
@@ -108,149 +188,89 @@ L2  Episodic Memory
 L3  Raw Events
 ```
 
-This allows OpenMemo to load only the most relevant information.
+### Reconstructive Recall
 
-Benefits:
+Instead of returning raw chunks, OpenMemo reconstructs coherent narratives with conflict annotations.
 
-- Reduces token usage
-- Faster recall
-- Better reasoning
+### Memory Governance
 
----
-
-## Reconstructive Recall
-
-Traditional memory systems simply retrieve text.
-
-OpenMemo does something different. It **reconstructs** memory.
-
-```
-retrieve → resolve → reconstruct
-```
-
-Instead of returning raw chunks, OpenMemo rebuilds a coherent narrative of past events.
-
-This enables AI systems to answer questions like:
-
-- *Why did we choose this approach earlier?*
-- *What caused the previous failure?*
-- *What solution worked last time?*
-
----
-
-## Memory Governance
-
-Long-running AI systems suffer from memory entropy.
-
-OpenMemo introduces governance mechanisms to keep memory healthy:
-
-- Conflict detection
-- Memory evolution
-- Maintenance workers
-- Duplicate cleanup
-
-This ensures memory remains reliable over time.
-
----
-
-## Quickstart
-
-### Option 1: Install from PyPI
-
-```bash
-pip install openmemo
-```
-
-```python
-from openmemo import Memory
-
-memory = Memory()
-
-memory.add("User prefers PostgreSQL for production")
-
-result = memory.recall("What database does the user prefer?")
-
-print(result)
-```
-
-### Option 2: Cloud API (no installation needed)
-
-```bash
-# Add a memory
-curl -X POST https://api.openmemo.ai/api/memories \
-  -H "Content-Type: application/json" \
-  -d '{"content": "User prefers PostgreSQL for production"}'
-
-# Recall
-curl -X POST https://api.openmemo.ai/api/memories/recall \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What database does the user prefer?"}'
-```
-
-### Option 3: Install from GitHub
-
-```bash
-pip install git+https://github.com/openmemoai/openmemo.git
-```
-
-### Option 4: Self-hosted REST Server
-
-```bash
-pip install "openmemo[server]"
-python -m openmemo.api.rest_server
-```
-
----
-
-## Example: Long-Running Agent
-
-OpenMemo enables agents to accumulate experience:
-
-```python
-memory.add("Bug fix: TypeError caused by missing config")
-
-# Over time, agents develop reusable knowledge
-skills = memory.maintain()
-```
+Conflict detection, memory evolution, maintenance workers, and duplicate cleanup.
 
 ---
 
 ## Architecture
 
 ```
-Applications
+Applications / Agents
       │
       ▼
-OpenMemo SDK
+OpenMemo SDK (Memory class)
       │
       ▼
 OpenMemo Core
-  ├── MemCell Engine
-  ├── Scene Manager
-  ├── Memory Pyramid
-  ├── Recall Engine
-  ├── Reconstruct Engine
-  └── Governance Layer
+  ├── MemCell Engine (typed cells, lifecycle, evolution)
+  ├── Scene Manager (auto-detection, grouping)
+  ├── Recall Engine (BM25 + Vector, hybrid retrieval)
+  ├── Reconstruct Engine (narrative + conflict annotation)
+  ├── Memory Pyramid (hierarchical compression)
+  ├── Skill Engine (pattern extraction)
+  └── Governance Layer (conflict detection, versioning)
+      │
+      ▼
+Storage (SQLite default, pluggable)
+```
+
+### Adapters
+
+| Adapter | Status | Usage |
+|---------|--------|-------|
+| MCP (Claude) | Available | `from openmemo.adapters.mcp import OpenMemoMCPServer` |
+| LangChain | Available | `from openmemo.adapters.langchain import OpenMemoMemory` |
+| OpenClaw | Available | `from openmemo.adapters.openclaw import OpenClawMemoryBackend` |
+
+---
+
+## API Reference
+
+### REST Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/memory/write` | Write a memory |
+| `POST` | `/memory/recall` | Recall relevant memories |
+| `POST` | `/memory/search` | Search memories (raw top-K) |
+| `GET` | `/memory/scenes` | List all scenes |
+| `DELETE` | `/memory/{id}` | Delete a memory |
+| `POST` | `/memory/reconstruct` | Reconstruct narrative |
+| `POST` | `/api/maintain` | Run maintenance |
+| `GET` | `/api/stats` | Get statistics |
+| `GET` | `/health` | Health check |
+| `GET` | `/docs` | API documentation |
+
+### SDK Methods
+
+```python
+memory = Memory(db_path="openmemo.db")
+
+memory.add(content, agent_id="", scene="", cell_type="fact")
+memory.recall(query, agent_id="", scene="", top_k=10, budget=2000)
+memory.search(query, agent_id="", top_k=10)
+memory.reconstruct(query, agent_id="")
+memory.scenes(agent_id="")
+memory.delete(memory_id)
+memory.maintain()
+memory.stats()
 ```
 
 ---
 
-## Ecosystem
+## Cookbooks
 
-OpenMemo is designed to power a wide range of AI systems:
+See `cookbooks/` for complete examples:
 
-- AI agents
-- Developer copilots
-- Research assistants
-- Customer support systems
-- AI hardware devices
-
-Adapters can be built for:
-
-- OpenClaw
-- LangGraph
-- CrewAI
-- Custom Agents
+- `coding_assistant.py` — Programming assistant with project context
+- `customer_support.py` — Support agent with customer history
+- `personal_memory.py` — Personal assistant with evolving knowledge
 
 ---
 
@@ -261,75 +281,36 @@ Adapters can be built for:
 | Structure | Flat embeddings | Flat log | **Hierarchical (MemCell + MemScene)** |
 | Conflict handling | None | None | **Automatic detection + resolution** |
 | Evolution | Append-only | Append-only | **Consolidate, promote, forget** |
-| Recall | Top-K similarity | Last N messages | **Tri-brain + reconstructive recall** |
+| Recall | Top-K similarity | Last N messages | **Hybrid retrieval + reconstructive recall** |
 | Token control | Fixed window | Grows forever | **Pyramid auto-compression** |
+| Agent isolation | Manual | None | **Built-in agent_id** |
 | Governance | None | None | **Built-in maintenance** |
-
----
-
-## Use Cases
-
-OpenMemo is useful for systems that require long-term memory:
-
-- Long-running AI agents
-- Developer assistants
-- Research systems
-- Enterprise knowledge systems
-- AI hardware devices
-
----
-
-## Examples
-
-See the `examples/` directory:
-
-```
-examples/
-  coding_agent_demo/
-  research_agent/
-  memory_stress_test/
-```
 
 ---
 
 ## Installation
 
-Clone the repository:
+### From PyPI
+
+```bash
+pip install openmemo           # Core SDK
+pip install "openmemo[server]" # With REST server
+```
+
+### From GitHub
+
+```bash
+pip install git+https://github.com/openmemoai/openmemo.git
+```
+
+### Development
 
 ```bash
 git clone https://github.com/openmemoai/openmemo.git
 cd openmemo
-pip install -e .
+pip install -e ".[dev]"
+pytest tests/
 ```
-
-Run the demo:
-
-```bash
-python examples/memory_stress_test/run_demo.py
-```
-
----
-
-## Philosophy
-
-Memory is not storage.
-
-Memory is a **system**.
-
-To build reliable AI systems, we need more than vector databases.
-
-We need a **memory architecture**.
-
----
-
-## Roadmap
-
-Upcoming features:
-
-- Agent adapters
-- Multi-agent memory
-- Memory governance dashboards
-- Hardware integrations
 
 ---
 
@@ -339,12 +320,12 @@ We welcome community contributions.
 
 Good areas for contribution include:
 
-- New integrations
-- Adapters for AI frameworks
+- New adapters for AI frameworks
 - Example cookbooks
+- Storage backends
 - Documentation improvements
 
-Core memory engine changes require review by the maintainers to maintain architectural consistency.
+Core memory engine changes require review by the maintainers.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
@@ -353,8 +334,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 ## License
 
 OpenMemo is released under the **Apache License 2.0**.
-
-This allows anyone to use, modify, and distribute the software freely, including in commercial products. Patent protection is included.
 
 See the [LICENSE](LICENSE) file for full details.
 

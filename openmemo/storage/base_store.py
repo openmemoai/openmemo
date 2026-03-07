@@ -19,7 +19,7 @@ class BaseStore(ABC):
         pass
 
     @abstractmethod
-    def list_notes(self, limit: int = 100, offset: int = 0) -> List[dict]:
+    def list_notes(self, limit: int = 100, offset: int = 0, agent_id: str = None) -> List[dict]:
         pass
 
     @abstractmethod
@@ -35,7 +35,12 @@ class BaseStore(ABC):
         pass
 
     @abstractmethod
-    def list_cells(self, limit: int = 100, offset: int = 0) -> List[dict]:
+    def list_cells(self, limit: int = 100, offset: int = 0,
+                   agent_id: str = None, scene: str = None) -> List[dict]:
+        pass
+
+    @abstractmethod
+    def delete_cell(self, cell_id: str) -> bool:
         pass
 
     @abstractmethod
@@ -47,7 +52,7 @@ class BaseStore(ABC):
         pass
 
     @abstractmethod
-    def list_scenes(self, limit: int = 100, offset: int = 0) -> List[dict]:
+    def list_scenes(self, limit: int = 100, offset: int = 0, agent_id: str = None) -> List[dict]:
         pass
 
     @abstractmethod

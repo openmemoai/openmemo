@@ -3,11 +3,12 @@ MemCell Engine - Enhanced memory write units.
 
 A MemCell wraps an AtomicFact with:
 - Lifecycle stage (exploration -> consolidation -> mastery -> dormant)
+- Cell type (fact, decision, preference, constraint, observation)
 - Importance scoring
 - Embedding vector
 - Connection graph
 
-Evolution thresholds are configurable via EvolutionConfig.
+Evolution thresholds are encapsulated internally.
 """
 
 import uuid
@@ -24,17 +25,28 @@ class LifecycleStage(str, Enum):
     DORMANT = "dormant"
 
 
+class CellType(str, Enum):
+    FACT = "fact"
+    DECISION = "decision"
+    PREFERENCE = "preference"
+    CONSTRAINT = "constraint"
+    OBSERVATION = "observation"
+
+
 @dataclass
 class MemCell:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     note_id: str = ""
     content: str = ""
+    cell_type: str = "fact"
     facts: list = field(default_factory=list)
     stage: LifecycleStage = LifecycleStage.EXPLORATION
     importance: float = 0.5
     access_count: int = 0
     last_accessed: float = field(default_factory=time.time)
     created_at: float = field(default_factory=time.time)
+    agent_id: str = ""
+    scene: str = ""
     embedding: Optional[list] = None
     connections: list = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
@@ -64,12 +76,15 @@ class MemCell:
             "id": self.id,
             "note_id": self.note_id,
             "content": self.content,
+            "cell_type": self.cell_type,
             "facts": self.facts,
             "stage": self.stage.value,
             "importance": self.importance,
             "access_count": self.access_count,
             "last_accessed": self.last_accessed,
             "created_at": self.created_at,
+            "agent_id": self.agent_id,
+            "scene": self.scene,
             "connections": self.connections,
             "metadata": self.metadata,
         }
@@ -80,12 +95,15 @@ class MemCell:
             id=data.get("id", str(uuid.uuid4())),
             note_id=data.get("note_id", ""),
             content=data.get("content", ""),
+            cell_type=data.get("cell_type", "fact"),
             facts=data.get("facts", []),
             stage=LifecycleStage(data.get("stage", "exploration")),
             importance=data.get("importance", 0.5),
             access_count=data.get("access_count", 0),
             last_accessed=data.get("last_accessed", time.time()),
             created_at=data.get("created_at", time.time()),
+            agent_id=data.get("agent_id", ""),
+            scene=data.get("scene", ""),
             connections=data.get("connections", []),
             metadata=data.get("metadata", {}),
         )

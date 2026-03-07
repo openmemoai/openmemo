@@ -5,9 +5,9 @@ Usage:
     from openmemo import Memory
 
     memory = Memory()
-    memory.add("User prefers dark mode")
-    result = memory.recall("user preference")
-    print(result)
+    memory.add("User prefers dark mode", agent_id="agent_1", scene="preferences")
+    results = memory.recall("user preference", agent_id="agent_1")
+    print(results)
 """
 
 import uuid
@@ -16,7 +16,7 @@ from typing import List, Optional, Callable
 
 from openmemo.config import OpenMemoConfig
 from openmemo.core.memory import Note
-from openmemo.core.memcell import MemCell, LifecycleStage
+from openmemo.core.memcell import MemCell, LifecycleStage, CellType
 from openmemo.core.scene import MemScene
 from openmemo.core.recall import RecallEngine
 from openmemo.core.reconstruct import ReconstructiveRecall
@@ -33,14 +33,13 @@ class Memory:
     """
     The main entry point for OpenMemo.
 
-    Provides a simple API for adding, recalling, searching,
+    Provides a simple API for writing, recalling, searching,
     and managing memories.
 
     Args:
         db_path: Path to SQLite database file. Default: "openmemo.db"
         store: Custom storage backend (must implement BaseStore interface)
         embed_fn: Optional embedding function for vector search.
-                  Should accept a string and return a list of floats.
         config: Optional OpenMemoConfig for customizing engine behavior.
     """
 
@@ -72,19 +71,27 @@ class Memory:
         self.conflict_detector = ConflictDetector(config=self._config.governance)
         self.version_manager = VersionManager()
 
-    def add(self, content: str, source: str = "manual", metadata: dict = None) -> str:
-        note = Note(content=content, source=source, metadata=metadata or {})
-        self.store.put_note(note.to_dict())
-
+    def add(self, content: str, source: str = "manual", agent_id: str = "",
+            scene: str = "", cell_type: str = "fact", metadata: dict = None) -> str:
         from openmemo._internal import get_evolution_params
+
+        note = Note(content=content, source=source, metadata=metadata or {})
+        note_dict = note.to_dict()
+        note_dict["agent_id"] = agent_id
+        note_dict["scene"] = scene
+        self.store.put_note(note_dict)
+
         cell = MemCell(
             note_id=note.id,
             content=content,
+            cell_type=cell_type,
             stage=LifecycleStage.EXPLORATION,
             importance=get_evolution_params()["default_importance"],
+            agent_id=agent_id,
+            scene=scene,
         )
 
-        existing_cells = self.store.list_cells(limit=50)
+        existing_cells = self.store.list_cells(limit=50, agent_id=agent_id or None)
         conflicts = self.conflict_detector.detect(cell.to_dict(), existing_cells)
         if conflicts:
             cell.metadata["has_conflicts"] = True
@@ -92,6 +99,9 @@ class Memory:
 
         self.version_manager.snapshot(cell.to_dict(), change_type="create")
         self.store.put_cell(cell.to_dict())
+
+        if scene:
+            self._ensure_scene(scene, cell.id, agent_id)
 
         if self.vector_store and self.embed_fn:
             try:
@@ -102,8 +112,12 @@ class Memory:
 
         return note.id
 
-    def recall(self, query: str, top_k: int = 10, budget: int = 2000) -> List[dict]:
-        results = self.recall_engine.recall(query, top_k=top_k, budget=budget)
+    def recall(self, query: str, agent_id: str = "", scene: str = "",
+               top_k: int = 10, budget: int = 2000) -> List[dict]:
+        results = self.recall_engine.recall(
+            query, top_k=top_k, budget=budget,
+            agent_id=agent_id or None, scene=scene or None,
+        )
 
         for r in results:
             cell = self.store.get_cell(r.cell_id)
@@ -122,8 +136,11 @@ class Memory:
             for r in results
         ]
 
-    def search(self, query: str, top_k: int = 10) -> List[dict]:
-        results = self.recall_engine.recall(query, top_k=top_k, budget=50000)
+    def search(self, query: str, agent_id: str = "", top_k: int = 10) -> List[dict]:
+        results = self.recall_engine.recall(
+            query, top_k=top_k, budget=50000,
+            agent_id=agent_id or None,
+        )
         return [
             {
                 "content": r.content,
@@ -133,7 +150,7 @@ class Memory:
             for r in results
         ]
 
-    def reconstruct(self, query: str, max_sources: int = 10) -> dict:
+    def reconstruct(self, query: str, agent_id: str = "", max_sources: int = 10) -> dict:
         result = self.reconstructor.reconstruct(query, max_sources=max_sources)
         return {
             "query": result.query,
@@ -142,12 +159,19 @@ class Memory:
             "confidence": result.confidence,
         }
 
+    def scenes(self, agent_id: str = "") -> List[dict]:
+        return self.store.list_scenes(agent_id=agent_id or None)
+
+    def delete(self, memory_id: str) -> bool:
+        cell_deleted = self.store.delete_cell(memory_id)
+        if cell_deleted:
+            return True
+        return self.store.delete_note(memory_id)
+
     def maintain(self) -> dict:
         cells = self.store.list_cells(limit=500)
         pyramid_result = self.pyramid.process(cells)
-
         skills = self.skill_engine.extract_skills()
-
         return {
             "pyramid": pyramid_result,
             "new_skills": len(skills),
@@ -175,6 +199,21 @@ class Memory:
             "stages": stage_counts,
             "unresolved_conflicts": len(conflicts),
         }
+
+    def _ensure_scene(self, scene_name: str, cell_id: str, agent_id: str = ""):
+        all_scenes = self.store.list_scenes(agent_id=agent_id or None)
+        for s in all_scenes:
+            if s.get("title") == scene_name:
+                scene_obj = MemScene.from_dict(s)
+                scene_obj.add_cell(cell_id)
+                self.store.put_scene(scene_obj.to_dict())
+                return
+
+        new_scene = MemScene(title=scene_name, theme=scene_name)
+        new_scene.add_cell(cell_id)
+        scene_dict = new_scene.to_dict()
+        scene_dict["agent_id"] = agent_id
+        self.store.put_scene(scene_dict)
 
     def close(self):
         self.store.close()

@@ -1,16 +1,13 @@
 """
 Recall Engine - Pluggable retrieval architecture.
 
-Supports multiple retrieval strategies:
-- Fast Brain: keyword/BM25 matching
-- Middle Brain: semantic embedding similarity (vector store)
-
+Supports multiple retrieval strategies and scene-based filtering.
 Custom strategies can be injected via RecallStrategy interface.
-Ranking and scoring internals are encapsulated within strategy implementations.
 """
 
 import re
 import math
+import time
 from abc import ABC, abstractmethod
 from typing import List, Optional
 from dataclasses import dataclass, field
@@ -37,7 +34,9 @@ class BM25Strategy(RecallStrategy):
         if not keywords:
             return []
 
-        all_cells = store.list_cells()
+        agent_id = kwargs.get("agent_id")
+        scene = kwargs.get("scene")
+        all_cells = store.list_cells(agent_id=agent_id, scene=scene)
         scored = []
 
         for cell in all_cells:
@@ -147,11 +146,15 @@ class RecallEngine:
 
         self._merge_strategy = merge_strategy or DefaultMergeStrategy()
 
-    def recall(self, query: str, top_k: int = 10, budget: int = 2000) -> List[RecallResult]:
+    def recall(self, query: str, top_k: int = 10, budget: int = 2000,
+               agent_id: str = None, scene: str = None) -> List[RecallResult]:
         all_results = []
 
         for strategy in self._strategies:
-            results = strategy.retrieve(query, store=self.store, top_k=top_k * 2)
+            results = strategy.retrieve(
+                query, store=self.store, top_k=top_k * 2,
+                agent_id=agent_id, scene=scene,
+            )
             all_results.extend(results)
 
         merged = self._merge_strategy.merge(all_results, top_k)

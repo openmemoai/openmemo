@@ -1,7 +1,7 @@
 import pytest
 import time
 from openmemo.core.memory import Note, AtomicFact
-from openmemo.core.memcell import MemCell, LifecycleStage
+from openmemo.core.memcell import MemCell, LifecycleStage, CellType
 from openmemo.core.scene import MemScene
 
 
@@ -44,6 +44,16 @@ class TestMemCell:
         assert cell.stage == LifecycleStage.EXPLORATION
         assert cell.importance == 0.5
         assert cell.access_count == 0
+        assert cell.cell_type == "fact"
+
+    def test_create_with_type(self):
+        cell = MemCell(content="user prefers dark mode", cell_type="preference")
+        assert cell.cell_type == "preference"
+
+    def test_create_with_agent_id(self):
+        cell = MemCell(content="test", agent_id="agent_1", scene="coding")
+        assert cell.agent_id == "agent_1"
+        assert cell.scene == "coding"
 
     def test_access_updates_count(self):
         cell = MemCell(content="test")
@@ -61,13 +71,24 @@ class TestMemCell:
         assert cell.stage == LifecycleStage.MASTERY
 
     def test_to_dict_and_from_dict(self):
-        cell = MemCell(content="roundtrip", importance=0.9)
+        cell = MemCell(content="roundtrip", importance=0.9,
+                       cell_type="decision", agent_id="a1", scene="s1")
         cell.access()
         d = cell.to_dict()
         restored = MemCell.from_dict(d)
         assert restored.content == "roundtrip"
         assert restored.access_count == 1
         assert restored.importance == 0.9
+        assert restored.cell_type == "decision"
+        assert restored.agent_id == "a1"
+        assert restored.scene == "s1"
+
+    def test_cell_type_enum(self):
+        assert CellType.FACT == "fact"
+        assert CellType.DECISION == "decision"
+        assert CellType.PREFERENCE == "preference"
+        assert CellType.CONSTRAINT == "constraint"
+        assert CellType.OBSERVATION == "observation"
 
 
 class TestMemScene:

@@ -5,6 +5,7 @@ Provides HTTP API access to OpenMemo.
 Install with: pip install openmemo[server]
 
 Usage:
+    openmemo serve
     python -m openmemo.api.rest_server
 """
 
@@ -42,16 +43,13 @@ def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
             "github": "https://github.com/openmemoai/openmemo",
             "endpoints": {
                 "health": "GET /health",
-                "add_memory": "POST /api/memories",
-                "recall": "POST /api/memories/recall",
-                "search": "POST /api/memories/search",
-                "reconstruct": "POST /api/memories/reconstruct",
+                "write": "POST /memory/write",
+                "recall": "POST /memory/recall",
+                "search": "POST /memory/search",
+                "scenes": "GET /memory/scenes",
+                "delete": "DELETE /memory/{id}",
                 "maintain": "POST /api/maintain",
                 "stats": "GET /api/stats",
-            },
-            "quickstart": {
-                "install": "pip install git+https://github.com/openmemoai/openmemo.git",
-                "example": 'curl -X POST https://api.openmemo.ai/api/memories -H "Content-Type: application/json" -d \'{"content": "User prefers dark mode"}\'',
             },
         })
 
@@ -65,55 +63,79 @@ def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
     def health():
         return jsonify({"status": "ok", "service": "openmemo", "version": "0.2.0"})
 
+    @app.route("/memory/write", methods=["POST"])
     @app.route("/api/memories", methods=["POST"])
-    def add_memory():
+    def write_memory():
         data = request.get_json()
         if not data or "content" not in data:
             return jsonify({"error": "content is required"}), 400
 
-        note_id = memory.add(
+        memory_id = memory.add(
             content=data["content"],
             source=data.get("source", "api"),
+            agent_id=data.get("agent_id", ""),
+            scene=data.get("scene", ""),
+            cell_type=data.get("cell_type", "fact"),
             metadata=data.get("metadata", {}),
         )
-        return jsonify({"id": note_id}), 201
+        return jsonify({"memory_id": memory_id}), 201
 
+    @app.route("/memory/recall", methods=["POST"])
     @app.route("/api/memories/recall", methods=["POST"])
-    def recall():
+    def recall_memory():
         data = request.get_json()
         if not data or "query" not in data:
             return jsonify({"error": "query is required"}), 400
 
         results = memory.recall(
             query=data["query"],
+            agent_id=data.get("agent_id", ""),
+            scene=data.get("scene", ""),
             top_k=data.get("top_k", 10),
             budget=data.get("budget", 2000),
         )
         return jsonify({"results": results})
 
+    @app.route("/memory/search", methods=["POST"])
     @app.route("/api/memories/search", methods=["POST"])
-    def search():
+    def search_memory():
         data = request.get_json()
         if not data or "query" not in data:
             return jsonify({"error": "query is required"}), 400
 
         results = memory.search(
             query=data["query"],
+            agent_id=data.get("agent_id", ""),
             top_k=data.get("top_k", 10),
         )
         return jsonify({"results": results})
 
+    @app.route("/memory/reconstruct", methods=["POST"])
     @app.route("/api/memories/reconstruct", methods=["POST"])
-    def reconstruct():
+    def reconstruct_memory():
         data = request.get_json()
         if not data or "query" not in data:
             return jsonify({"error": "query is required"}), 400
 
         result = memory.reconstruct(
             query=data["query"],
+            agent_id=data.get("agent_id", ""),
             max_sources=data.get("max_sources", 10),
         )
         return jsonify(result)
+
+    @app.route("/memory/scenes", methods=["GET"])
+    def list_scenes():
+        agent_id = request.args.get("agent_id", "")
+        scenes = memory.scenes(agent_id=agent_id)
+        return jsonify({"scenes": scenes})
+
+    @app.route("/memory/<memory_id>", methods=["DELETE"])
+    def delete_memory(memory_id):
+        deleted = memory.delete(memory_id)
+        if deleted:
+            return jsonify({"deleted": True}), 200
+        return jsonify({"error": "not found"}), 404
 
     @app.route("/api/maintain", methods=["POST"])
     def maintain():

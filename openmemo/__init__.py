@@ -7,6 +7,7 @@ for autonomous AI systems.
 
 from openmemo.api.sdk import Memory
 from openmemo.config import OpenMemoConfig
+from openmemo.core.memcell import CellType
 
-__version__ = "0.2.0"
-__all__ = ["Memory", "OpenMemoConfig"]
+__version__ = "0.3.0"
+__all__ = ["Memory", "OpenMemoConfig", "CellType"]
