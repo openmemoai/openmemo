@@ -1,17 +1,13 @@
 """
 OpenMemo Configuration - Centralized configuration management.
 
-All tunable parameters are managed through OpenMemoConfig.
-This allows the engine behavior to be customized without
-modifying source code.
-
-Default values are intentionally generic baselines.
-For production tuning, provide a custom config via
-OpenMemoConfig.from_dict() or environment variables.
+Public configuration exposes only high-level behavioral switches.
+Internal tuning parameters are encapsulated within engine
+implementations and not exposed through this interface.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional
 
 
 @dataclass
@@ -28,25 +24,18 @@ class GovernanceConfig:
 
 
 @dataclass
-class EvolutionConfig:
-    mastery_min_access: int = 5
-    mastery_min_importance: float = 0.6
-    consolidation_min_access: int = 2
-    dormant_days: int = 30
-    default_importance: float = 0.5
-
-
-@dataclass
 class PyramidConfig:
-    short_term_max: int = 50
-    short_term_hours: int = 24
-    batch_size: int = 5
+    enabled: bool = True
 
 
 @dataclass
 class SkillConfig:
-    pattern_threshold: int = 3
     auto_extract: bool = True
+
+
+@dataclass
+class EvolutionConfig:
+    enabled: bool = True
 
 
 @dataclass

@@ -76,11 +76,12 @@ class Memory:
         note = Note(content=content, source=source, metadata=metadata or {})
         self.store.put_note(note.to_dict())
 
+        from openmemo._internal import get_evolution_params
         cell = MemCell(
             note_id=note.id,
             content=content,
             stage=LifecycleStage.EXPLORATION,
-            importance=self._config.evolution.default_importance,
+            importance=get_evolution_params()["default_importance"],
         )
 
         existing_cells = self.store.list_cells(limit=50)
@@ -108,7 +109,7 @@ class Memory:
             cell = self.store.get_cell(r.cell_id)
             if cell:
                 cell_obj = MemCell.from_dict(cell)
-                cell_obj.access(evolution_config=self._config.evolution)
+                cell_obj.access()
                 self.store.put_cell(cell_obj.to_dict())
 
         return [

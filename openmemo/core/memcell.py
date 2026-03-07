@@ -39,22 +39,24 @@ class MemCell:
     connections: list = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
 
-    def access(self, evolution_config=None):
+    def access(self, evolution_strategy=None):
         self.access_count += 1
         self.last_accessed = time.time()
-        self._update_stage(evolution_config)
+        if evolution_strategy:
+            evolution_strategy.evaluate(self)
+        else:
+            self._default_evolve()
 
-    def _update_stage(self, config=None):
-        from openmemo.config import EvolutionConfig
-        cfg = config or EvolutionConfig()
-
-        if self.access_count >= cfg.mastery_min_access and self.importance >= cfg.mastery_min_importance:
+    def _default_evolve(self):
+        from openmemo._internal import get_evolution_params
+        params = get_evolution_params()
+        if self.access_count >= params["mastery_access"] and self.importance >= params["mastery_importance"]:
             self.stage = LifecycleStage.MASTERY
-        elif self.access_count >= cfg.consolidation_min_access:
+        elif self.access_count >= params["consolidation_access"]:
             self.stage = LifecycleStage.CONSOLIDATION
 
         age_days = (time.time() - self.last_accessed) / 86400
-        if age_days > cfg.dormant_days and self.stage != LifecycleStage.MASTERY:
+        if age_days > params["dormant_days"] and self.stage != LifecycleStage.MASTERY:
             self.stage = LifecycleStage.DORMANT
 
     def to_dict(self):

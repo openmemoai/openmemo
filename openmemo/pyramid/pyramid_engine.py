@@ -42,29 +42,33 @@ class DefaultCompressionStrategy(CompressionStrategy):
 class PyramidEngine:
     def __init__(self, store=None, summarizer=None,
                  compression: CompressionStrategy = None, config=None):
-        from openmemo.config import PyramidConfig
         self.store = store
-        self._config = config or PyramidConfig()
+        self._config = config
         self._compression = compression or DefaultCompressionStrategy(summarizer)
 
+    def _params(self):
+        from openmemo._internal import get_pyramid_params
+        return get_pyramid_params()
+
     def process(self, cells: List[dict]) -> dict:
+        params = self._params()
         short_term = []
         mid_term = []
 
         for cell in cells:
             age_hours = (time.time() - cell.get("created_at", time.time())) / 3600
 
-            if age_hours < self._config.short_term_hours:
+            if age_hours < params["short_term_hours"]:
                 short_term.append(cell)
             else:
                 mid_term.append(cell)
 
         promotions = 0
-        if len(short_term) > self._config.short_term_max:
-            overflow = short_term[self._config.short_term_max:]
-            short_term = short_term[:self._config.short_term_max]
+        if len(short_term) > params["short_term_max"]:
+            overflow = short_term[params["short_term_max"]:]
+            short_term = short_term[:params["short_term_max"]]
 
-            for batch in self._batch(overflow, self._config.batch_size):
+            for batch in self._batch(overflow, params["batch_size"]):
                 summary = self._compression.compress(batch)
                 mid_term.append({
                     "content": summary,

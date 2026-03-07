@@ -50,11 +50,12 @@ class SkillExtractor(ABC):
 
 class DefaultSkillExtractor(SkillExtractor):
     def __init__(self, config=None):
-        from openmemo.config import SkillConfig
-        self._config = config or SkillConfig()
+        self._config = config
 
     def should_extract(self, pattern: str, count: int, successes: int) -> bool:
-        return count >= self._config.pattern_threshold
+        from openmemo._internal import get_skill_params
+        params = get_skill_params()
+        return count >= params["pattern_threshold"]
 
 
 class RelevanceScorer(ABC):
