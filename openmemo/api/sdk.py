@@ -14,6 +14,7 @@ import uuid
 import time
 from typing import List, Optional, Callable
 
+from openmemo.config import OpenMemoConfig
 from openmemo.core.memory import Note
 from openmemo.core.memcell import MemCell, LifecycleStage
 from openmemo.core.scene import MemScene
@@ -39,10 +40,12 @@ class Memory:
         store: Custom storage backend (must implement BaseStore interface)
         embed_fn: Optional embedding function for vector search.
                   Should accept a string and return a list of floats.
-                  Example: lambda text: model.encode(text).tolist()
+        config: Optional OpenMemoConfig for customizing engine behavior.
     """
 
-    def __init__(self, db_path: str = "openmemo.db", store=None, embed_fn: Callable = None):
+    def __init__(self, db_path: str = "openmemo.db", store=None,
+                 embed_fn: Callable = None, config: OpenMemoConfig = None):
+        self._config = config or OpenMemoConfig()
         self.store = store or SQLiteStore(db_path)
         self.embed_fn = embed_fn
         self.vector_store = VectorStore() if embed_fn else None
@@ -50,6 +53,7 @@ class Memory:
             store=self.store,
             vector_store=self.vector_store,
             embed_fn=self.embed_fn,
+            config=self._config.recall,
         )
         self.reconstructor = ReconstructiveRecall(
             recall_engine=self.recall_engine,
@@ -58,9 +62,13 @@ class Memory:
         self.pyramid = PyramidEngine(
             store=self.store,
             summarizer=Summarizer(),
+            config=self._config.pyramid,
         )
-        self.skill_engine = SkillEngine(store=self.store)
-        self.conflict_detector = ConflictDetector()
+        self.skill_engine = SkillEngine(
+            store=self.store,
+            config=self._config.skill,
+        )
+        self.conflict_detector = ConflictDetector(config=self._config.governance)
         self.version_manager = VersionManager()
 
     def add(self, content: str, source: str = "manual", metadata: dict = None) -> str:

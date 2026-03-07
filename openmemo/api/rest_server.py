@@ -19,23 +19,24 @@ except ImportError:
 
 from openmemo.api.sdk import Memory
 from openmemo.api.docs import API_DOCS_HTML
+from openmemo.config import OpenMemoConfig
 
 
-def create_app(db_path: str = None) -> Flask:
+def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
     app = Flask(__name__)
     CORS(app)
 
     db = db_path or os.environ.get("OPENMEMO_DB", "openmemo.db")
     from openmemo.storage.sqlite_store import SQLiteStore
     store = SQLiteStore(db_path=db, check_same_thread=False)
-    memory = Memory(db_path=db, store=store)
+    memory = Memory(db_path=db, store=store, config=config)
 
     @app.route("/")
     def index():
         return jsonify({
             "service": "OpenMemo API",
-            "version": "0.1.0",
-            "description": "The Memory Architecture for AI Systems",
+            "version": "0.2.0",
+            "description": "The Memory Infrastructure for AI Agents",
             "status": "running",
             "docs": "https://api.openmemo.ai/docs",
             "github": "https://github.com/openmemoai/openmemo",
@@ -61,7 +62,7 @@ def create_app(db_path: str = None) -> Flask:
 
     @app.route("/health")
     def health():
-        return jsonify({"status": "ok", "service": "openmemo", "version": "0.1.0"})
+        return jsonify({"status": "ok", "service": "openmemo", "version": "0.2.0"})
 
     @app.route("/api/memories", methods=["POST"])
     def add_memory():

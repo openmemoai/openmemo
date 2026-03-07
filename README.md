@@ -14,8 +14,6 @@ MemCell → MemScene → Memory Pyramid → Reconstructive Recall
 
 OpenMemo enables AI agents to remember, evolve, and reason over past experience — rather than simply retrieving text chunks.
 
-![OpenMemo Demo](docs/openmemo-demo-ai.gif)
-
 ---
 
 ## Why Another Memory System?
@@ -354,9 +352,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## License
 
-OpenMemo is released under the **AGPLv3 License**.
+OpenMemo is released under the **Apache License 2.0**.
 
-This allows anyone to use and modify the software, while ensuring that modifications deployed as a service remain open source.
+This allows anyone to use, modify, and distribute the software freely, including in commercial products. Patent protection is included.
 
 See the [LICENSE](LICENSE) file for full details.
 

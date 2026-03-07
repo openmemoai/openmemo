@@ -1,18 +1,107 @@
 """
-Recall Engine - Tri-brain retrieval architecture.
+Recall Engine - Pluggable retrieval architecture.
 
-Three retrieval strategies:
+Supports multiple retrieval strategies:
 - Fast Brain: keyword/BM25 matching
 - Middle Brain: semantic embedding similarity (vector store)
-- Slow Brain: LLM-powered reasoning (optional)
 
-Results are merged and reranked with token budget control.
+Custom strategies can be injected via RecallStrategy interface.
 """
 
 import re
 import math
+from abc import ABC, abstractmethod
 from typing import List, Optional
 from dataclasses import dataclass, field
+
+from openmemo.protocol.schemas import RecallResultItem
+
+
+class RecallStrategy(ABC):
+    @abstractmethod
+    def retrieve(self, query: str, store=None, top_k: int = 10, **kwargs) -> List[RecallResultItem]:
+        pass
+
+
+class BM25Strategy(RecallStrategy):
+    def __init__(self, config=None):
+        from openmemo.config import RecallConfig
+        self._config = config or RecallConfig()
+
+    def retrieve(self, query: str, store=None, top_k: int = 10, **kwargs) -> List[RecallResultItem]:
+        if not store:
+            return []
+
+        keywords = self._extract_keywords(query)
+        if not keywords:
+            return []
+
+        all_cells = store.list_cells()
+        scored = []
+
+        for cell in all_cells:
+            score = self._bm25_score(keywords, cell.get("content", ""))
+            if score > 0:
+                scored.append(RecallResultItem(
+                    cell_id=cell.get("id", ""),
+                    content=cell.get("content", ""),
+                    score=score,
+                    source="fast",
+                ))
+
+        scored.sort(key=lambda x: x.score, reverse=True)
+        return scored[:top_k]
+
+    def _extract_keywords(self, query: str) -> List[str]:
+        stop_words = {"the", "a", "an", "is", "are", "was", "were", "in", "on", "at", "to", "for",
+                      "of", "and", "or", "but", "not", "with", "this", "that", "it", "be", "have",
+                      "do", "what", "how", "when", "where", "who", "which", "my", "your", "i"}
+        words = re.findall(r'\w+', query.lower())
+        return [w for w in words if w not in stop_words and len(w) > 1]
+
+    def _bm25_score(self, keywords: List[str], text: str) -> float:
+        text_lower = text.lower()
+        words = text_lower.split()
+        doc_len = len(words)
+
+        score = 0.0
+        for kw in keywords:
+            tf = text_lower.count(kw)
+            if tf > 0:
+                idf = math.log(2.0)
+                tf_norm = (tf * (self._config.bm25_k1 + 1)) / (
+                    tf + self._config.bm25_k1 * (
+                        1 - self._config.bm25_b + self._config.bm25_b * doc_len / self._config.bm25_avg_doc_len
+                    )
+                )
+                score += idf * tf_norm
+
+        return score
+
+
+class VectorStrategy(RecallStrategy):
+    def __init__(self, vector_store=None, embed_fn=None):
+        self._vector_store = vector_store
+        self._embed_fn = embed_fn
+
+    def retrieve(self, query: str, store=None, top_k: int = 10, **kwargs) -> List[RecallResultItem]:
+        if not self._vector_store or not self._embed_fn:
+            return []
+
+        try:
+            query_embedding = self._embed_fn(query)
+            results = self._vector_store.search(query_embedding, top_k=top_k)
+            return [
+                RecallResultItem(
+                    cell_id=r.get("id", ""),
+                    content=r.get("content", ""),
+                    score=r.get("score", 0.0),
+                    source="middle",
+                )
+                for r in results
+            ]
+        except Exception:
+            return []
 
 
 @dataclass
@@ -25,74 +114,42 @@ class RecallResult:
 
 
 class RecallEngine:
-    def __init__(self, store=None, vector_store=None, embed_fn=None):
+    def __init__(self, store=None, vector_store=None, embed_fn=None,
+                 strategies: List[RecallStrategy] = None, config=None):
+        from openmemo.config import RecallConfig
         self.store = store
-        self.vector_store = vector_store
-        self.embed_fn = embed_fn
+        self._config = config or RecallConfig()
+
+        if strategies is not None:
+            self._strategies = strategies
+        else:
+            self._strategies = [BM25Strategy(config=self._config)]
+            if vector_store and embed_fn:
+                self._strategies.append(VectorStrategy(vector_store, embed_fn))
 
     def recall(self, query: str, top_k: int = 10, budget: int = 2000) -> List[RecallResult]:
-        results = []
+        all_results = []
 
-        fast_results = self._fast_brain(query, top_k * 2)
-        results.extend(fast_results)
+        for strategy in self._strategies:
+            results = strategy.retrieve(query, store=self.store, top_k=top_k * 2)
+            all_results.extend(results)
 
-        mid_results = self._middle_brain(query, top_k * 2)
-        results.extend(mid_results)
-
-        merged = self._merge_and_rerank(results, top_k)
+        merged = self._merge_and_rerank(all_results, top_k)
         return self._apply_budget(merged, budget)
 
-    def _fast_brain(self, query: str, top_k: int) -> List[RecallResult]:
-        if not self.store:
-            return []
-
-        keywords = self._extract_keywords(query)
-        if not keywords:
-            return []
-
-        all_cells = self.store.list_cells()
-        scored = []
-
-        for cell in all_cells:
-            score = self._bm25_score(keywords, cell.get("content", ""))
-            if score > 0:
-                scored.append(RecallResult(
-                    cell_id=cell.get("id", ""),
-                    content=cell.get("content", ""),
-                    score=score,
-                    source="fast",
-                ))
-
-        scored.sort(key=lambda x: x.score, reverse=True)
-        return scored[:top_k]
-
-    def _middle_brain(self, query: str, top_k: int) -> List[RecallResult]:
-        if not self.vector_store or not self.embed_fn:
-            return []
-
-        try:
-            query_embedding = self.embed_fn(query)
-            results = self.vector_store.search(query_embedding, top_k=top_k)
-            return [
-                RecallResult(
-                    cell_id=r.get("id", ""),
-                    content=r.get("content", ""),
-                    score=r.get("score", 0.0),
-                    source="middle",
-                )
-                for r in results
-            ]
-        except Exception:
-            return []
-
-    def _merge_and_rerank(self, results: List[RecallResult], top_k: int) -> List[RecallResult]:
+    def _merge_and_rerank(self, results: List[RecallResultItem], top_k: int) -> List[RecallResult]:
         seen = {}
         for r in results:
             if r.cell_id in seen:
                 existing = seen[r.cell_id]
-                existing.score = max(existing.score, r.score) * 1.2
+                existing.score = max(existing.score, r.score) * self._config.merge_boost
             else:
-                seen[r.cell_id] = r
+                seen[r.cell_id] = RecallResult(
+                    cell_id=r.cell_id,
+                    content=r.content,
+                    score=r.score,
+                    source=r.source,
+                )
 
         merged = list(seen.values())
         merged.sort(key=lambda x: x.score, reverse=True)
@@ -108,26 +165,3 @@ class RecallEngine:
             total_tokens += tokens
             budgeted.append(r)
         return budgeted
-
-    def _extract_keywords(self, query: str) -> List[str]:
-        stop_words = {"the", "a", "an", "is", "are", "was", "were", "in", "on", "at", "to", "for",
-                      "of", "and", "or", "but", "not", "with", "this", "that", "it", "be", "have",
-                      "do", "what", "how", "when", "where", "who", "which", "my", "your", "i"}
-        words = re.findall(r'\w+', query.lower())
-        return [w for w in words if w not in stop_words and len(w) > 1]
-
-    def _bm25_score(self, keywords: List[str], text: str, k1: float = 1.5, b: float = 0.75) -> float:
-        text_lower = text.lower()
-        words = text_lower.split()
-        doc_len = len(words)
-        avg_len = 100
-
-        score = 0.0
-        for kw in keywords:
-            tf = text_lower.count(kw)
-            if tf > 0:
-                idf = math.log(2.0)
-                tf_norm = (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * doc_len / avg_len))
-                score += idf * tf_norm
-
-        return score

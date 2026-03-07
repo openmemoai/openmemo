@@ -1,13 +1,12 @@
 """
 Reconstructive Recall - Narrative generation from memory.
 
-Given a query, reconstructs a coherent narrative by:
-1. Recalling relevant MemCells
-2. Ordering by timeline
-3. Building a structured response
+Supports pluggable reconstruction strategies.
+The default implementation provides basic timeline-based narrative.
 """
 
 import time
+from abc import ABC, abstractmethod
 from typing import List, Optional
 from dataclasses import dataclass, field
 
@@ -21,10 +20,36 @@ class Reconstruction:
     timestamp: float = field(default_factory=time.time)
 
 
+class ReconstructStrategy(ABC):
+    @abstractmethod
+    def build_narrative(self, query: str, segments: List[str], scores: List[float]) -> Reconstruction:
+        pass
+
+
+class DefaultReconstructStrategy(ReconstructStrategy):
+    def build_narrative(self, query: str, segments: List[str], scores: List[float]) -> Reconstruction:
+        if not segments:
+            return Reconstruction(query=query, narrative="No relevant memories found.")
+
+        if len(segments) == 1:
+            narrative = segments[0]
+        else:
+            narrative = "\n\n".join(f"- {s}" for s in segments)
+
+        avg_score = sum(scores) / len(scores) if scores else 0
+
+        return Reconstruction(
+            query=query,
+            narrative=narrative,
+            confidence=min(avg_score, 1.0),
+        )
+
+
 class ReconstructiveRecall:
-    def __init__(self, recall_engine=None, store=None):
+    def __init__(self, recall_engine=None, store=None, strategy: ReconstructStrategy = None):
         self.recall_engine = recall_engine
         self.store = store
+        self._strategy = strategy or DefaultReconstructStrategy()
 
     def reconstruct(self, query: str, max_sources: int = 10) -> Reconstruction:
         if not self.recall_engine:
@@ -40,23 +65,10 @@ class ReconstructiveRecall:
             key=lambda r: r.metadata.get("timestamp", 0) if r.metadata else 0
         )
 
-        segments = []
-        for r in sorted_results:
-            segments.append(r.content)
+        segments = [r.content for r in sorted_results]
+        scores = [r.score for r in sorted_results]
 
-        narrative = self._build_narrative(segments)
-        avg_score = sum(r.score for r in sorted_results) / len(sorted_results) if sorted_results else 0
+        reconstruction = self._strategy.build_narrative(query, segments, scores)
+        reconstruction.sources = [r.cell_id for r in sorted_results]
 
-        return Reconstruction(
-            query=query,
-            narrative=narrative,
-            sources=[r.cell_id for r in sorted_results],
-            confidence=min(avg_score, 1.0),
-        )
-
-    def _build_narrative(self, segments: List[str]) -> str:
-        if not segments:
-            return ""
-        if len(segments) == 1:
-            return segments[0]
-        return "\n\n".join(f"- {s}" for s in segments)
+        return reconstruction

@@ -2,11 +2,13 @@
 Skill Engine - Experience to skill extraction.
 
 Detects repeated patterns in agent behavior and extracts
-them into reusable skills that improve over time.
+them into reusable skills. Extraction rules are configurable
+via SkillConfig.
 """
 
 import uuid
 import time
+from abc import ABC, abstractmethod
 from typing import List, Optional
 from dataclasses import dataclass, field
 
@@ -40,11 +42,25 @@ class Skill:
         }
 
 
-class SkillEngine:
-    PATTERN_THRESHOLD = 3
+class SkillExtractor(ABC):
+    @abstractmethod
+    def should_extract(self, pattern: str, count: int, successes: int) -> bool:
+        pass
 
-    def __init__(self, store=None):
+
+class DefaultSkillExtractor(SkillExtractor):
+    def __init__(self, config=None):
+        from openmemo.config import SkillConfig
+        self._config = config or SkillConfig()
+
+    def should_extract(self, pattern: str, count: int, successes: int) -> bool:
+        return count >= self._config.pattern_threshold
+
+
+class SkillEngine:
+    def __init__(self, store=None, extractor: SkillExtractor = None, config=None):
         self.store = store
+        self._extractor = extractor or DefaultSkillExtractor(config=config)
         self._pattern_counts = {}
 
     def observe(self, action: str, context: str = "", success: bool = True):
@@ -60,7 +76,7 @@ class SkillEngine:
         new_skills = []
 
         for pattern, data in self._pattern_counts.items():
-            if data["count"] >= self.PATTERN_THRESHOLD:
+            if self._extractor.should_extract(pattern, data["count"], data["successes"]):
                 skill = Skill(
                     name=pattern,
                     description=f"Learned from {data['count']} observations",

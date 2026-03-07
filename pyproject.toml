@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openmemo"
-version = "0.1.0"
-description = "The Memory Operating System for AI Agents"
+version = "0.2.0"
+description = "The Memory Infrastructure for AI Agents"
 readme = "README.md"
-license = {text = "AGPL-3.0-or-later"}
+license = {text = "Apache-2.0"}
 requires-python = ">=3.9"
 authors = [
     {name = "OpenMemo Contributors"}
@@ -16,7 +16,7 @@ keywords = ["memory", "ai", "agents", "llm", "rag", "knowledge"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",

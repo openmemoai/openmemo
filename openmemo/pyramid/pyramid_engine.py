@@ -1,15 +1,12 @@
 """
 Memory Pyramid Engine.
 
-Three-tier memory compression:
-- Short-term: Raw notes and recent MemCells
-- Mid-term: Category summaries and patterns
-- Long-term: Stable user profile and knowledge
-
-Controls token budget by auto-compressing older memories.
+Three-tier memory compression with configurable parameters.
+Compression strategy is pluggable via CompressionStrategy interface.
 """
 
 import time
+from abc import ABC, abstractmethod
 from typing import List, Optional
 from dataclasses import dataclass, field
 
@@ -24,14 +21,30 @@ class PyramidEntry:
     metadata: dict = field(default_factory=dict)
 
 
-class PyramidEngine:
-    SHORT_TERM_MAX = 50
-    MID_TERM_MAX = 20
-    LONG_TERM_MAX = 10
+class CompressionStrategy(ABC):
+    @abstractmethod
+    def compress(self, cells: List[dict]) -> str:
+        pass
 
-    def __init__(self, store=None, summarizer=None):
+
+class DefaultCompressionStrategy(CompressionStrategy):
+    def __init__(self, summarizer=None):
+        self._summarizer = summarizer
+
+    def compress(self, cells: List[dict]) -> str:
+        if self._summarizer:
+            return self._summarizer.summarize(cells)
+        contents = [c.get("content", "") for c in cells]
+        return " | ".join(contents)
+
+
+class PyramidEngine:
+    def __init__(self, store=None, summarizer=None,
+                 compression: CompressionStrategy = None, config=None):
+        from openmemo.config import PyramidConfig
         self.store = store
-        self.summarizer = summarizer
+        self._config = config or PyramidConfig()
+        self._compression = compression or DefaultCompressionStrategy(summarizer)
 
     def process(self, cells: List[dict]) -> dict:
         short_term = []
@@ -40,25 +53,24 @@ class PyramidEngine:
         for cell in cells:
             age_hours = (time.time() - cell.get("created_at", time.time())) / 3600
 
-            if age_hours < 24:
+            if age_hours < self._config.short_term_hours:
                 short_term.append(cell)
             else:
                 mid_term.append(cell)
 
         promotions = 0
-        if len(short_term) > self.SHORT_TERM_MAX:
-            overflow = short_term[self.SHORT_TERM_MAX:]
-            short_term = short_term[:self.SHORT_TERM_MAX]
+        if len(short_term) > self._config.short_term_max:
+            overflow = short_term[self._config.short_term_max:]
+            short_term = short_term[:self._config.short_term_max]
 
-            if self.summarizer:
-                for batch in self._batch(overflow, 5):
-                    summary = self.summarizer.summarize(batch)
-                    mid_term.append({
-                        "content": summary,
-                        "tier": "mid",
-                        "source_ids": [c.get("id", "") for c in batch],
-                    })
-                    promotions += 1
+            for batch in self._batch(overflow, self._config.batch_size):
+                summary = self._compression.compress(batch)
+                mid_term.append({
+                    "content": summary,
+                    "tier": "mid",
+                    "source_ids": [c.get("id", "") for c in batch],
+                })
+                promotions += 1
 
         return {
             "short_term": len(short_term),
