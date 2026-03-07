@@ -36,7 +36,7 @@ def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
     def index():
         return jsonify({
             "service": "OpenMemo API",
-            "version": "0.2.0",
+            "version": "0.3.0",
             "description": "The Memory Infrastructure for AI Agents",
             "status": "running",
             "docs": "https://api.openmemo.ai/docs",
@@ -61,7 +61,7 @@ def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
 
     @app.route("/health")
     def health():
-        return jsonify({"status": "ok", "service": "openmemo", "version": "0.2.0"})
+        return jsonify({"status": "ok", "service": "openmemo", "version": "0.3.0"})
 
     @app.route("/memory/write", methods=["POST"])
     @app.route("/api/memories", methods=["POST"])

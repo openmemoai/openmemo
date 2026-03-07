@@ -151,7 +151,10 @@ class Memory:
         ]
 
     def reconstruct(self, query: str, agent_id: str = "", max_sources: int = 10) -> dict:
-        result = self.reconstructor.reconstruct(query, max_sources=max_sources)
+        result = self.reconstructor.reconstruct(
+            query, max_sources=max_sources,
+            agent_id=agent_id or None,
+        )
         return {
             "query": result.query,
             "narrative": result.narrative,
