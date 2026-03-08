@@ -1,5 +1,5 @@
 """
-OpenMemo Remote Client — HTTP-based Memory API.
+OpenMemo Remote Client — HTTP-based Memory Core API v1.0
 
 Connects to a remote OpenMemo server (e.g., api.openmemo.ai)
 instead of using a local database.
@@ -8,9 +8,9 @@ Usage:
     from openmemo import RemoteMemory
 
     mem = RemoteMemory(base_url="https://api.openmemo.ai")
-    mem.write("User prefers Python", agent_id="agent_1")
-    result = mem.recall("language preference", agent_id="agent_1")
-    print(result)
+    mem.write_memory("User prefers Python", scene="coding", memory_type="preference")
+    result = mem.recall_context("language preference", scene="coding")
+    print(result)  # {"context": ["User prefers Python"]}
 
 Install with:
     pip install openmemo[remote]
@@ -30,7 +30,7 @@ class RemoteMemory:
     """
     HTTP client for OpenMemo REST API.
 
-    Provides the same interface as Memory (local SDK) but
+    Provides the same 5 core APIs as the local SDK but
     calls a remote server over HTTP.
 
     Args:
@@ -71,77 +71,110 @@ class RemoteMemory:
         resp.raise_for_status()
         return resp.json()
 
-    def write(self, content: str, agent_id: str = "", scene: str = "",
-              cell_type: str = "fact", source: str = "api",
-              metadata: dict = None) -> str:
+    # ─── Core API 1: write_memory ───
+
+    def write_memory(self, content: str, scene: str = "",
+                     memory_type: str = "fact", confidence: float = 0.8,
+                     agent_id: str = "", metadata: dict = None) -> str:
         data = {
             "content": content,
-            "agent_id": agent_id,
             "scene": scene,
-            "cell_type": cell_type,
-            "source": source,
+            "type": memory_type,
+            "confidence": confidence,
+            "agent_id": agent_id,
         }
         if metadata:
             data["metadata"] = metadata
         result = self._post("/memory/write", data)
         return result.get("memory_id", "")
 
-    def add(self, content: str, source: str = "api", agent_id: str = "",
-            scene: str = "", cell_type: str = "fact",
-            metadata: dict = None) -> str:
-        return self.write(
-            content=content, agent_id=agent_id, scene=scene,
-            cell_type=cell_type, source=source, metadata=metadata,
-        )
+    # ─── Core API 2: search_memory ───
 
-    def recall(self, query: str, agent_id: str = "", scene: str = "",
-               mode: str = "kv", top_k: int = None, limit: int = None,
-               budget: int = 2000) -> dict:
+    def search_memory(self, query: str, scene: str = "",
+                      agent_id: str = "", limit: int = 10) -> List[dict]:
         data = {
             "query": query,
-            "agent_id": agent_id,
-            "mode": mode,
-            "budget": budget,
-        }
-        if scene:
-            data["scene"] = scene
-        if limit:
-            data["limit"] = limit
-        elif top_k:
-            data["top_k"] = top_k
-        return self._post("/memory/recall", data)
-
-    def context(self, query: str, agent_id: str = "", scene: str = "",
-                limit: int = 3) -> List[str]:
-        data = {
-            "query": query,
-            "agent_id": agent_id,
             "limit": limit,
+            "agent_id": agent_id,
         }
         if scene:
             data["scene"] = scene
-        result = self._post("/agent/context", data)
-        return result.get("memory_context", [])
-
-    def search(self, query: str, agent_id: str = "",
-               top_k: int = None, limit: int = None) -> List[dict]:
-        data = {
-            "query": query,
-            "agent_id": agent_id,
-        }
-        if limit:
-            data["limit"] = limit
-        elif top_k:
-            data["top_k"] = top_k
         result = self._post("/memory/search", data)
         return result.get("results", [])
 
-    def scenes(self, agent_id: str = "") -> List[str]:
+    # ─── Core API 3: recall_context ───
+
+    def recall_context(self, query: str, scene: str = "",
+                       agent_id: str = "", limit: int = 5,
+                       mode: str = "kv") -> dict:
+        data = {
+            "query": query,
+            "limit": limit,
+            "mode": mode,
+            "agent_id": agent_id,
+        }
+        if scene:
+            data["scene"] = scene
+        return self._post("/memory/recall", data)
+
+    # ─── Core API 4: list_scenes ───
+
+    def list_scenes(self, agent_id: str = "") -> List[str]:
         params = {}
         if agent_id:
             params["agent_id"] = agent_id
         result = self._get("/memory/scenes", params=params)
         return result.get("scenes", [])
+
+    # ─── Core API 5: memory_governance ───
+
+    def memory_governance(self, operation: str = "cleanup") -> dict:
+        return self._post("/memory/governance", {"operation": operation})
+
+    # ─── Backward-compatible aliases ───
+
+    def write(self, content: str, agent_id: str = "", scene: str = "",
+              cell_type: str = "fact", source: str = "api",
+              metadata: dict = None) -> str:
+        return self.write_memory(
+            content=content, scene=scene, memory_type=cell_type,
+            agent_id=agent_id, metadata=metadata,
+        )
+
+    def add(self, content: str, source: str = "api", agent_id: str = "",
+            scene: str = "", cell_type: str = "fact",
+            metadata: dict = None) -> str:
+        return self.write_memory(
+            content=content, scene=scene, memory_type=cell_type,
+            agent_id=agent_id, metadata=metadata,
+        )
+
+    def recall(self, query: str, agent_id: str = "", scene: str = "",
+               mode: str = "kv", top_k: int = None, limit: int = None,
+               budget: int = 2000) -> dict:
+        effective_limit = limit or top_k or 5
+        return self.recall_context(
+            query=query, scene=scene, agent_id=agent_id,
+            limit=effective_limit, mode=mode,
+        )
+
+    def context(self, query: str, agent_id: str = "", scene: str = "",
+                limit: int = 3) -> List[str]:
+        result = self.recall_context(
+            query=query, scene=scene, agent_id=agent_id,
+            limit=limit, mode="kv",
+        )
+        return result.get("context", [])
+
+    def search(self, query: str, agent_id: str = "",
+               top_k: int = None, limit: int = None) -> List[dict]:
+        effective_limit = limit or top_k or 10
+        return self.search_memory(
+            query=query, agent_id=agent_id, limit=effective_limit,
+        )
+
+    def scenes(self, agent_id: str = "") -> List[str]:
+        return self.list_scenes(agent_id=agent_id)
 
     def delete(self, memory_id: str) -> bool:
         try:

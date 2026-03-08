@@ -20,21 +20,6 @@ from typing import List, Dict
 
 
 class OpenClawMemoryBackend:
-    """
-    OpenClaw memory_backend=openmemo integration.
-
-    Supports two modes:
-    - Local: Uses embedded SQLite via Memory SDK (default)
-    - Remote: Calls OpenMemo REST API via RemoteMemory
-
-    Args:
-        db_path: Local database path (local mode only). Default: "openmemo.db"
-        agent_id: Agent identifier for memory isolation.
-        memory: Pre-configured Memory or RemoteMemory instance.
-        base_url: Remote API URL. If provided, uses remote mode.
-        api_key: API key for remote authentication (future use).
-    """
-
     def __init__(self, db_path: str = "openmemo.db", agent_id: str = "",
                  memory=None, base_url: str = None, api_key: str = None):
         self.agent_id = agent_id
@@ -48,39 +33,54 @@ class OpenClawMemoryBackend:
             from openmemo.api.sdk import Memory
             self._memory = Memory(db_path=db_path)
 
-    def write(self, content: str, scene: str = "", cell_type: str = "fact") -> str:
-        return self._memory.write(
+    def write_memory(self, content: str, scene: str = "",
+                     memory_type: str = "fact", confidence: float = 0.8) -> str:
+        return self._memory.write_memory(
             content=content,
-            agent_id=self.agent_id,
             scene=scene,
-            cell_type=cell_type,
-            source="openclaw",
+            memory_type=memory_type,
+            confidence=confidence,
+            agent_id=self.agent_id,
         )
 
-    def recall(self, query: str, scene: str = "", mode: str = "kv",
-               limit: int = 10) -> dict:
-        return self._memory.recall(
+    def recall_context(self, query: str, scene: str = "",
+                       mode: str = "kv", limit: int = 5) -> dict:
+        return self._memory.recall_context(
             query=query,
-            agent_id=self.agent_id,
             scene=scene,
+            agent_id=self.agent_id,
             mode=mode,
             limit=limit,
         )
 
-    def search(self, query: str, limit: int = 10) -> List[Dict]:
-        return self._memory.search(
+    def search_memory(self, query: str, scene: str = "",
+                      limit: int = 10) -> List[Dict]:
+        return self._memory.search_memory(
             query=query,
+            scene=scene,
             agent_id=self.agent_id,
             limit=limit,
         )
 
+    def list_scenes(self) -> List[str]:
+        return self._memory.list_scenes(agent_id=self.agent_id)
+
+    def memory_governance(self, operation: str = "cleanup") -> dict:
+        return self._memory.memory_governance(operation=operation)
+
+    def write(self, content: str, scene: str = "", cell_type: str = "fact") -> str:
+        return self.write_memory(content=content, scene=scene, memory_type=cell_type)
+
+    def recall(self, query: str, scene: str = "", mode: str = "kv",
+               limit: int = 10) -> dict:
+        return self.recall_context(query=query, scene=scene, mode=mode, limit=limit)
+
+    def search(self, query: str, limit: int = 10) -> List[Dict]:
+        return self.search_memory(query=query, limit=limit)
+
     def get_context(self, query: str, scene: str = "", limit: int = 3) -> List[str]:
-        return self._memory.context(
-            query=query,
-            agent_id=self.agent_id,
-            scene=scene,
-            limit=limit,
-        )
+        result = self.recall_context(query=query, scene=scene, limit=limit)
+        return result.get("context", [])
 
     def close(self):
         if hasattr(self._memory, 'close'):

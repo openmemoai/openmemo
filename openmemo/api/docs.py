@@ -271,10 +271,6 @@ API_DOCS_HTML = """<!DOCTYPE html>
             margin-top: 12px;
         }
 
-        .try-it {
-            margin-top: 8px;
-        }
-
         .back-link {
             color: #58a6ff;
             text-decoration: none;
@@ -306,7 +302,7 @@ API_DOCS_HTML = """<!DOCTYPE html>
             <p><a href="/" class="back-link">&larr; Back to API</a></p>
             <br>
             <h1>OpenMemo API Documentation</h1>
-            <p>The Memory Architecture for AI Systems &mdash; REST API Reference</p>
+            <p>Memory Core API v1.0 &mdash; The Memory Infrastructure for AI Agents</p>
         </header>
 
         <div class="base-url">
@@ -335,7 +331,8 @@ API_DOCS_HTML = """<!DOCTYPE html>
                     <pre><code>{
   <span class="key">"status"</span>: <span class="string">"ok"</span>,
   <span class="key">"service"</span>: <span class="string">"openmemo"</span>,
-  <span class="key">"version"</span>: <span class="string">"0.3.0"</span>
+  <span class="key">"api_version"</span>: <span class="string">"1.0"</span>,
+  <span class="key">"engine_version"</span>: <span class="string">"0.4.0"</span>
 }</code></pre>
                 </div>
             </div>
@@ -351,7 +348,7 @@ API_DOCS_HTML = """<!DOCTYPE html>
                     <span class="endpoint-desc">Store a new memory</span>
                 </div>
                 <div class="endpoint-body">
-                    <p>Write a memory to OpenMemo. Supports agent isolation via agent_id, scene-based grouping, and typed memory cells (fact, decision, preference, constraint, observation).</p>
+                    <p>Write a memory to OpenMemo. Supports agent isolation via agent_id, scene-based grouping, typed memory cells, and confidence scoring.</p>
 
                     <div class="params-title">Request Body</div>
                     <table>
@@ -368,28 +365,28 @@ API_DOCS_HTML = """<!DOCTYPE html>
                             <td>The memory content to store</td>
                         </tr>
                         <tr>
-                            <td>agent_id</td>
-                            <td><span class="type">string</span></td>
-                            <td><span class="optional">optional</span></td>
-                            <td>Agent identifier for memory isolation</td>
-                        </tr>
-                        <tr>
                             <td>scene</td>
                             <td><span class="type">string</span></td>
                             <td><span class="optional">optional</span></td>
-                            <td>Context scene (e.g., "coding", "planning")</td>
+                            <td>Context scene (e.g., "coding", "deployment")</td>
                         </tr>
                         <tr>
-                            <td>cell_type</td>
+                            <td>type</td>
                             <td><span class="type">string</span></td>
                             <td><span class="optional">optional</span></td>
                             <td>One of: fact, decision, preference, constraint, observation. Default: <code>"fact"</code></td>
                         </tr>
                         <tr>
-                            <td>source</td>
+                            <td>confidence</td>
+                            <td><span class="type">number</span></td>
+                            <td><span class="optional">optional</span></td>
+                            <td>Confidence level 0-1. Default: <code>0.8</code></td>
+                        </tr>
+                        <tr>
+                            <td>agent_id</td>
                             <td><span class="type">string</span></td>
                             <td><span class="optional">optional</span></td>
-                            <td>Source identifier. Default: <code>"api"</code></td>
+                            <td>Agent identifier for memory isolation</td>
                         </tr>
                         <tr>
                             <td>metadata</td>
@@ -403,15 +400,16 @@ API_DOCS_HTML = """<!DOCTYPE html>
                     <pre><code><span class="cmd">curl</span> -X POST https://api.openmemo.ai/memory/write \\
   -H <span class="string">"Content-Type: application/json"</span> \\
   -d <span class="string">'{
-    "content": "User prefers PostgreSQL for production",
-    "agent_id": "coding_agent",
-    "scene": "infrastructure",
-    "cell_type": "preference"
+    "content": "User prefers Python backend",
+    "scene": "coding",
+    "type": "preference",
+    "confidence": 0.9
   }'</span></code></pre>
 
                     <div class="code-label">Response <span class="response-status status-2xx">201</span></div>
                     <pre><code>{
-  <span class="key">"memory_id"</span>: <span class="string">"a1b2c3d4-e5f6-7890-abcd-ef1234567890"</span>
+  <span class="key">"memory_id"</span>: <span class="string">"a1b2c3d4-e5f6-7890-abcd-ef1234567890"</span>,
+  <span class="key">"status"</span>: <span class="string">"stored"</span>
 }</code></pre>
 
                     <div class="error-section">
@@ -424,17 +422,17 @@ API_DOCS_HTML = """<!DOCTYPE html>
             </div>
         </div>
 
-        <!-- Recall -->
+        <!-- Recall Context -->
         <div class="section" id="recall">
-            <h2>Recall Memory</h2>
+            <h2>Recall Context</h2>
             <div class="endpoint">
                 <div class="endpoint-header">
                     <span class="method method-post">POST</span>
                     <span class="path">/memory/recall</span>
-                    <span class="endpoint-desc">Contextual memory retrieval</span>
+                    <span class="endpoint-desc">Agent reasoning context retrieval</span>
                 </div>
                 <div class="endpoint-body">
-                    <p>Recall relevant memories using hybrid retrieval (BM25 + optional vector). Supports agent isolation and scene filtering.</p>
+                    <p>The most important API. Recalls relevant memories for agent reasoning using hybrid retrieval (BM25 + optional vector), scene filtering, and memory synthesis.</p>
 
                     <div class="params-title">Request Body</div>
                     <table>
@@ -451,41 +449,56 @@ API_DOCS_HTML = """<!DOCTYPE html>
                             <td>The search query</td>
                         </tr>
                         <tr>
-                            <td>agent_id</td>
-                            <td><span class="type">string</span></td>
-                            <td><span class="optional">optional</span></td>
-                            <td>Filter by agent</td>
-                        </tr>
-                        <tr>
                             <td>scene</td>
                             <td><span class="type">string</span></td>
                             <td><span class="optional">optional</span></td>
                             <td>Filter by scene</td>
                         </tr>
                         <tr>
-                            <td>top_k</td>
+                            <td>limit</td>
                             <td><span class="type">integer</span></td>
                             <td><span class="optional">optional</span></td>
-                            <td>Maximum results. Default: <code>10</code></td>
+                            <td>Maximum results. Default: <code>5</code></td>
                         </tr>
                         <tr>
-                            <td>budget</td>
-                            <td><span class="type">integer</span></td>
+                            <td>mode</td>
+                            <td><span class="type">string</span></td>
                             <td><span class="optional">optional</span></td>
-                            <td>Token budget. Default: <code>2000</code></td>
+                            <td>One of: <code>kv</code> (default), <code>narrative</code>, <code>raw</code></td>
+                        </tr>
+                        <tr>
+                            <td>agent_id</td>
+                            <td><span class="type">string</span></td>
+                            <td><span class="optional">optional</span></td>
+                            <td>Filter by agent</td>
                         </tr>
                     </table>
 
-                    <div class="code-label">Request</div>
+                    <div class="code-label">Request (KV mode)</div>
                     <pre><code><span class="cmd">curl</span> -X POST https://api.openmemo.ai/memory/recall \\
   -H <span class="string">"Content-Type: application/json"</span> \\
-  -d <span class="string">'{"query": "database preference", "agent_id": "coding_agent"}'</span></code></pre>
+  -d <span class="string">'{"query": "deploy application", "scene": "deployment", "limit": 5, "mode": "kv"}'</span></code></pre>
 
-                    <div class="code-label">Response <span class="response-status status-2xx">200</span></div>
+                    <div class="code-label">Response (KV mode) <span class="response-status status-2xx">200</span></div>
                     <pre><code>{
-  <span class="key">"results"</span>: [
+  <span class="key">"context"</span>: [
+    <span class="string">"User deploys services using Docker"</span>,
+    <span class="string">"User uses AWS"</span>
+  ]
+}</code></pre>
+
+                    <div class="code-label">Response (Narrative mode) <span class="response-status status-2xx">200</span></div>
+                    <pre><code>{
+  <span class="key">"memory_story"</span>: <span class="string">"User deploys Docker services on AWS..."</span>,
+  <span class="key">"sources"</span>: [<span class="string">"a1b2..."</span>, <span class="string">"c3d4..."</span>],
+  <span class="key">"confidence"</span>: <span class="number">0.85</span>
+}</code></pre>
+
+                    <div class="code-label">Response (Raw mode) <span class="response-status status-2xx">200</span></div>
+                    <pre><code>{
+  <span class="key">"context"</span>: [
     {
-      <span class="key">"content"</span>: <span class="string">"User prefers PostgreSQL for production"</span>,
+      <span class="key">"content"</span>: <span class="string">"User deploys services using Docker"</span>,
       <span class="key">"score"</span>: <span class="number">3.576</span>,
       <span class="key">"source"</span>: <span class="string">"fast"</span>,
       <span class="key">"cell_id"</span>: <span class="string">"c81adb48-..."</span>
@@ -496,28 +509,62 @@ API_DOCS_HTML = """<!DOCTYPE html>
             </div>
         </div>
 
-        <!-- Search -->
+        <!-- Search Memory -->
         <div class="section" id="search">
             <h2>Search Memory</h2>
             <div class="endpoint">
                 <div class="endpoint-header">
                     <span class="method method-post">POST</span>
                     <span class="path">/memory/search</span>
-                    <span class="endpoint-desc">Direct memory search</span>
+                    <span class="endpoint-desc">Basic memory search</span>
                 </div>
                 <div class="endpoint-body">
-                    <p>Direct top-K search without context budget. Returns raw matches for debugging or UI display.</p>
+                    <p>Direct top-K search. Returns scored results for debugging or UI display.</p>
+
+                    <div class="params-title">Request Body</div>
+                    <table>
+                        <tr>
+                            <th>Parameter</th>
+                            <th>Type</th>
+                            <th>Required</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>query</td>
+                            <td><span class="type">string</span></td>
+                            <td><span class="required">required</span></td>
+                            <td>Search query</td>
+                        </tr>
+                        <tr>
+                            <td>scene</td>
+                            <td><span class="type">string</span></td>
+                            <td><span class="optional">optional</span></td>
+                            <td>Filter by scene</td>
+                        </tr>
+                        <tr>
+                            <td>limit</td>
+                            <td><span class="type">integer</span></td>
+                            <td><span class="optional">optional</span></td>
+                            <td>Maximum results. Default: <code>10</code></td>
+                        </tr>
+                        <tr>
+                            <td>agent_id</td>
+                            <td><span class="type">string</span></td>
+                            <td><span class="optional">optional</span></td>
+                            <td>Filter by agent</td>
+                        </tr>
+                    </table>
 
                     <div class="code-label">Request</div>
                     <pre><code><span class="cmd">curl</span> -X POST https://api.openmemo.ai/memory/search \\
   -H <span class="string">"Content-Type: application/json"</span> \\
-  -d <span class="string">'{"query": "database", "agent_id": "coding_agent", "top_k": 5}'</span></code></pre>
+  -d <span class="string">'{"query": "python", "scene": "coding", "limit": 10}'</span></code></pre>
 
                     <div class="code-label">Response <span class="response-status status-2xx">200</span></div>
                     <pre><code>{
   <span class="key">"results"</span>: [
     {
-      <span class="key">"content"</span>: <span class="string">"User prefers PostgreSQL"</span>,
+      <span class="key">"content"</span>: <span class="string">"User prefers Python backend"</span>,
       <span class="key">"score"</span>: <span class="number">2.0</span>,
       <span class="key">"cell_id"</span>: <span class="string">"c81adb48-..."</span>
     }
@@ -527,7 +574,7 @@ API_DOCS_HTML = """<!DOCTYPE html>
             </div>
         </div>
 
-        <!-- Scenes -->
+        <!-- List Scenes -->
         <div class="section" id="scenes">
             <h2>List Scenes</h2>
             <div class="endpoint">
@@ -537,7 +584,7 @@ API_DOCS_HTML = """<!DOCTYPE html>
                     <span class="endpoint-desc">List all memory scenes</span>
                 </div>
                 <div class="endpoint-body">
-                    <p>Returns all scenes, optionally filtered by agent_id. Scenes are auto-created when writing memories with a scene parameter.</p>
+                    <p>Returns all scene names. Scenes are auto-created when writing memories with a scene parameter.</p>
 
                     <div class="code-label">Request</div>
                     <pre><code><span class="cmd">curl</span> https://api.openmemo.ai/memory/scenes?agent_id=coding_agent</code></pre>
@@ -545,13 +592,55 @@ API_DOCS_HTML = """<!DOCTYPE html>
                     <div class="code-label">Response <span class="response-status status-2xx">200</span></div>
                     <pre><code>{
   <span class="key">"scenes"</span>: [
-    {
-      <span class="key">"id"</span>: <span class="string">"s1..."</span>,
-      <span class="key">"title"</span>: <span class="string">"infrastructure"</span>,
-      <span class="key">"cell_ids"</span>: [<span class="string">"c1..."</span>],
-      <span class="key">"agent_id"</span>: <span class="string">"coding_agent"</span>
-    }
+    <span class="string">"coding"</span>,
+    <span class="string">"deployment"</span>,
+    <span class="string">"research"</span>
   ]
+}</code></pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Memory Governance -->
+        <div class="section" id="governance">
+            <h2>Memory Governance</h2>
+            <div class="endpoint">
+                <div class="endpoint-header">
+                    <span class="method method-post">POST</span>
+                    <span class="path">/memory/governance</span>
+                    <span class="endpoint-desc">Memory cleanup and governance</span>
+                </div>
+                <div class="endpoint-body">
+                    <p>Run governance operations on memories: deduplication, merging, decay, or full cleanup.</p>
+
+                    <div class="params-title">Request Body</div>
+                    <table>
+                        <tr>
+                            <th>Parameter</th>
+                            <th>Type</th>
+                            <th>Required</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>operation</td>
+                            <td><span class="type">string</span></td>
+                            <td><span class="optional">optional</span></td>
+                            <td>One of: <code>dedupe</code>, <code>merge</code>, <code>decay</code>, <code>cleanup</code> (default)</td>
+                        </tr>
+                    </table>
+
+                    <div class="code-label">Request</div>
+                    <pre><code><span class="cmd">curl</span> -X POST https://api.openmemo.ai/memory/governance \\
+  -H <span class="string">"Content-Type: application/json"</span> \\
+  -d <span class="string">'{"operation": "cleanup"}'</span></code></pre>
+
+                    <div class="code-label">Response <span class="response-status status-2xx">200</span></div>
+                    <pre><code>{
+  <span class="key">"operation"</span>: <span class="string">"cleanup"</span>,
+  <span class="key">"duplicates_removed"</span>: <span class="number">2</span>,
+  <span class="key">"pyramid"</span>: { <span class="key">"promoted"</span>: <span class="number">3</span> },
+  <span class="key">"new_skills"</span>: <span class="number">1</span>,
+  <span class="key">"total_cells"</span>: <span class="number">42</span>
 }</code></pre>
                 </div>
             </div>
@@ -580,79 +669,29 @@ API_DOCS_HTML = """<!DOCTYPE html>
             </div>
         </div>
 
-        <!-- Reconstruct -->
-        <div class="section" id="reconstruct">
-            <h2>Reconstruct Memory</h2>
+        <!-- Agent Context -->
+        <div class="section" id="agent-context">
+            <h2>Agent Context</h2>
             <div class="endpoint">
                 <div class="endpoint-header">
                     <span class="method method-post">POST</span>
-                    <span class="path">/api/memories/reconstruct</span>
-                    <span class="endpoint-desc">Rebuild a coherent narrative from memories</span>
+                    <span class="path">/agent/context</span>
+                    <span class="endpoint-desc">Get context for prompt injection</span>
                 </div>
                 <div class="endpoint-body">
-                    <p>Instead of returning raw memory chunks, OpenMemo reconstructs a coherent narrative from related memories. This resolves conflicts and builds a timeline of events.</p>
-
-                    <div class="params-title">Request Body</div>
-                    <table>
-                        <tr>
-                            <th>Parameter</th>
-                            <th>Type</th>
-                            <th>Required</th>
-                            <th>Description</th>
-                        </tr>
-                        <tr>
-                            <td>query</td>
-                            <td><span class="type">string</span></td>
-                            <td><span class="required">required</span></td>
-                            <td>The topic to reconstruct</td>
-                        </tr>
-                        <tr>
-                            <td>max_sources</td>
-                            <td><span class="type">integer</span></td>
-                            <td><span class="optional">optional</span></td>
-                            <td>Maximum source memories to use. Default: <code>10</code></td>
-                        </tr>
-                    </table>
+                    <p>Convenience endpoint for agents. Returns a flat list of memory strings ready for system prompt injection.</p>
 
                     <div class="code-label">Request</div>
-                    <pre><code><span class="cmd">curl</span> -X POST https://api.openmemo.ai/api/memories/reconstruct \\
+                    <pre><code><span class="cmd">curl</span> -X POST https://api.openmemo.ai/agent/context \\
   -H <span class="string">"Content-Type: application/json"</span> \\
-  -d <span class="string">'{"query": "What happened with the database setup?"}'</span></code></pre>
+  -d <span class="string">'{"query": "user preferences", "agent_id": "my_agent", "limit": 3}'</span></code></pre>
 
                     <div class="code-label">Response <span class="response-status status-2xx">200</span></div>
                     <pre><code>{
-  <span class="key">"query"</span>: <span class="string">"What happened with the database setup?"</span>,
-  <span class="key">"narrative"</span>: <span class="string">"- User prefers PostgreSQL for production\\n- Database set to port 5432"</span>,
-  <span class="key">"sources"</span>: [<span class="string">"a1b2..."</span>, <span class="string">"c3d4..."</span>],
-  <span class="key">"confidence"</span>: <span class="number">0.85</span>
-}</code></pre>
-                </div>
-            </div>
-        </div>
-
-        <!-- Maintain -->
-        <div class="section" id="maintain">
-            <h2>Maintenance</h2>
-            <div class="endpoint">
-                <div class="endpoint-header">
-                    <span class="method method-post">POST</span>
-                    <span class="path">/api/maintain</span>
-                    <span class="endpoint-desc">Run memory maintenance tasks</span>
-                </div>
-                <div class="endpoint-body">
-                    <p>Triggers the Memory Pyramid compression, skill extraction, and governance cleanup. Run periodically to keep memory healthy and reduce noise.</p>
-
-                    <div class="code-label">Request</div>
-                    <pre><code><span class="cmd">curl</span> -X POST https://api.openmemo.ai/api/maintain</code></pre>
-
-                    <div class="code-label">Response <span class="response-status status-2xx">200</span></div>
-                    <pre><code>{
-  <span class="key">"pyramid"</span>: {
-    <span class="key">"promoted"</span>: <span class="number">3</span>,
-    <span class="key">"compressed"</span>: <span class="number">12</span>
-  },
-  <span class="key">"new_skills"</span>: <span class="number">1</span>,
-  <span class="key">"total_cells"</span>: <span class="number">42</span>
+  <span class="key">"memory_context"</span>: [
+    <span class="string">"User prefers Python backend"</span>,
+    <span class="string">"User deploys with Docker"</span>
+  ]
 }</code></pre>
                 </div>
             </div>
@@ -668,7 +707,7 @@ API_DOCS_HTML = """<!DOCTYPE html>
                     <span class="endpoint-desc">Get memory system statistics</span>
                 </div>
                 <div class="endpoint-body">
-                    <p>Returns current statistics about the memory system, including counts for notes, cells, scenes, skills, and lifecycle stages.</p>
+                    <p>Returns current statistics about the memory system.</p>
 
                     <div class="code-label">Request</div>
                     <pre><code><span class="cmd">curl</span> https://api.openmemo.ai/api/stats</code></pre>
@@ -705,25 +744,35 @@ API_DOCS_HTML = """<!DOCTYPE html>
                     <div class="code-label">Install</div>
                     <pre><code><span class="cmd">pip</span> install openmemo</code></pre>
 
-                    <div class="code-label">Usage</div>
-                    <pre><code><span class="comment"># Basic usage</span>
-<span class="key">from</span> openmemo <span class="key">import</span> Memory
+                    <div class="code-label">Local SDK</div>
+                    <pre><code><span class="key">from</span> openmemo <span class="key">import</span> OpenMemo
 
-memory = Memory()
+memo = OpenMemo()
 
-<span class="comment"># Write with agent isolation and scenes</span>
-memory.add(<span class="string">"User prefers dark mode"</span>,
-           agent_id=<span class="string">"my_agent"</span>,
-           scene=<span class="string">"preferences"</span>,
-           cell_type=<span class="string">"preference"</span>)
+<span class="comment"># Write memory</span>
+memo.write_memory(<span class="string">"User prefers Python backend"</span>,
+                  scene=<span class="string">"coding"</span>,
+                  memory_type=<span class="string">"preference"</span>)
 
-<span class="comment"># Recall with scene filtering</span>
-results = memory.recall(<span class="string">"UI preference"</span>, agent_id=<span class="string">"my_agent"</span>)
-<span class="key">for</span> r <span class="key">in</span> results:
-    print(r[<span class="string">"content"</span>], r[<span class="string">"score"</span>])
+<span class="comment"># Recall context (most important API)</span>
+result = memo.recall_context(<span class="string">"programming language"</span>, scene=<span class="string">"coding"</span>)
+print(result)  <span class="comment"># {"context": ["User prefers Python backend"]}</span>
+
+<span class="comment"># Search</span>
+results = memo.search_memory(<span class="string">"python"</span>, limit=<span class="number">10</span>)
 
 <span class="comment"># List scenes</span>
-scenes = memory.scenes(agent_id=<span class="string">"my_agent"</span>)</code></pre>
+scenes = memo.list_scenes()
+
+<span class="comment"># Governance</span>
+memo.memory_governance(<span class="string">"cleanup"</span>)</code></pre>
+
+                    <div class="code-label">Remote SDK</div>
+                    <pre><code><span class="key">from</span> openmemo <span class="key">import</span> RemoteMemory
+
+memo = RemoteMemory(base_url=<span class="string">"https://api.openmemo.ai"</span>)
+memo.write_memory(<span class="string">"User prefers dark mode"</span>, scene=<span class="string">"preferences"</span>)
+result = memo.recall_context(<span class="string">"UI preference"</span>)</code></pre>
 
                     <div class="code-label">CLI Server</div>
                     <pre><code><span class="cmd">pip</span> install openmemo[server]
@@ -732,7 +781,7 @@ scenes = memory.scenes(agent_id=<span class="string">"my_agent"</span>)</code></
                     <div class="code-label">MCP Adapter (for Claude)</div>
                     <pre><code><span class="key">from</span> openmemo.adapters.mcp <span class="key">import</span> OpenMemoMCPServer
 server = OpenMemoMCPServer()
-tools = server.get_tools()  <span class="comment"># memory_write, memory_recall, memory_search</span></code></pre>
+tools = server.get_tools()  <span class="comment"># write_memory, recall_context, search_memory, list_scenes</span></code></pre>
 
                     <div class="code-label">LangChain Adapter</div>
                     <pre><code><span class="key">from</span> openmemo.adapters.langchain <span class="key">import</span> OpenMemoMemory
@@ -760,7 +809,7 @@ memory = OpenMemoMemory(agent_id=<span class="string">"my_agent"</span>)
                         </tr>
                         <tr>
                             <td><span class="response-status status-2xx">201</span></td>
-                            <td>Created (new memory added)</td>
+                            <td>Created (new memory stored)</td>
                         </tr>
                         <tr>
                             <td><span class="response-status status-4xx">400</span></td>
@@ -782,7 +831,7 @@ memory = OpenMemoMemory(agent_id=<span class="string">"my_agent"</span>)
 
         <footer>
             <p>
-                OpenMemo v0.3.0 &nbsp;&middot;&nbsp;
+                OpenMemo API v1.0 (Engine v0.4.0) &nbsp;&middot;&nbsp;
                 <a href="https://github.com/openmemoai/openmemo">GitHub</a> &nbsp;&middot;&nbsp;
                 <a href="https://pypi.org/project/openmemo/">PyPI</a> &nbsp;&middot;&nbsp;
                 <a href="https://openmemo.ai">openmemo.ai</a>
@@ -793,12 +842,12 @@ memory = OpenMemoMemory(agent_id=<span class="string">"my_agent"</span>)
     <nav class="nav">
         <a href="#health">Health Check</a>
         <a href="#write-memory">Write Memory</a>
-        <a href="#recall">Recall Memory</a>
-        <a href="#search">Search</a>
-        <a href="#scenes">Scenes</a>
+        <a href="#recall">Recall Context</a>
+        <a href="#search">Search Memory</a>
+        <a href="#scenes">List Scenes</a>
+        <a href="#governance">Governance</a>
         <a href="#delete">Delete</a>
-        <a href="#reconstruct">Reconstruct</a>
-        <a href="#maintain">Maintenance</a>
+        <a href="#agent-context">Agent Context</a>
         <a href="#stats">Statistics</a>
         <a href="#python-sdk">Python SDK</a>
         <a href="#errors">Error Handling</a>

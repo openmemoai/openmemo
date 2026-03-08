@@ -1,20 +1,17 @@
 """
-OpenMemo REST Server — Memory API v1.
+OpenMemo REST Server — Memory Core API v1.0
 
-Agent-First API for AI memory operations.
+Agent-First HTTP API for memory operations.
 Install with: pip install openmemo[server]
 
-Usage:
-    openmemo serve
-    python -m openmemo.api.rest_server
-
 Endpoints:
-    POST /memory/write     — Write a memory
-    POST /memory/recall    — Recall memories (kv or narrative mode)
-    POST /memory/search    — Search memories (raw top-K)
-    GET  /memory/scenes    — List all scenes
-    DELETE /memory/{id}    — Delete a memory
-    POST /agent/context    — Get memory context for prompt injection
+    POST /memory/write       — Write a memory
+    POST /memory/search      — Basic search
+    POST /memory/recall      — Recall context (kv/narrative/raw)
+    GET  /memory/scenes      — List scenes
+    POST /memory/governance  — Memory governance operations
+    DELETE /memory/{id}      — Delete a memory
+    POST /agent/context      — Get context for prompt injection
 """
 
 import os
@@ -54,13 +51,13 @@ def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
             "github": "https://github.com/openmemoai/openmemo",
             "endpoints": {
                 "write": "POST /memory/write",
-                "recall": "POST /memory/recall",
                 "search": "POST /memory/search",
+                "recall": "POST /memory/recall",
                 "scenes": "GET /memory/scenes",
+                "governance": "POST /memory/governance",
                 "delete": "DELETE /memory/{id}",
                 "context": "POST /agent/context",
                 "health": "GET /health",
-                "maintain": "POST /api/maintain",
                 "stats": "GET /api/stats",
             },
         })
@@ -87,68 +84,61 @@ def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
         if not data or "content" not in data:
             return jsonify({"error": "content is required"}), 400
 
-        memory_id = memory.add(
+        memory_type = data.get("type", data.get("memory_type", data.get("cell_type", "fact")))
+        memory_id = memory.write_memory(
             content=data["content"],
-            source=data.get("source", "api"),
-            agent_id=data.get("agent_id", ""),
             scene=data.get("scene", ""),
-            cell_type=data.get("cell_type", "fact"),
+            memory_type=memory_type,
+            confidence=data.get("confidence", 0.8),
+            agent_id=data.get("agent_id", ""),
             metadata=data.get("metadata", {}),
         )
         return jsonify({"memory_id": memory_id, "status": "stored"}), 201
 
-    @app.route("/memory/recall", methods=["POST"])
-    @app.route("/api/memories/recall", methods=["POST"])
-    def recall_memory():
-        data = request.get_json()
-        if not data or "query" not in data:
-            return jsonify({"error": "query is required"}), 400
-
-        mode = data.get("mode", "kv")
-        effective_limit = data.get("limit", data.get("top_k", 10))
-
-        if mode == "narrative":
-            result = memory.reconstruct(
-                query=data["query"],
-                agent_id=data.get("agent_id", ""),
-                max_sources=effective_limit,
-            )
-            return jsonify({
-                "memory_story": result["narrative"],
-                "sources": result.get("sources", []),
-                "confidence": result.get("confidence", 0),
-            })
-
-        results = memory.recall_raw(
-            query=data["query"],
-            agent_id=data.get("agent_id", ""),
-            scene=data.get("scene", ""),
-            top_k=effective_limit,
-            budget=data.get("budget", 2000),
-        )
-        return jsonify({
-            "memories": [r["content"] for r in results],
-        })
-
     @app.route("/memory/search", methods=["POST"])
     @app.route("/api/memories/search", methods=["POST"])
-    def search_memory():
+    def search_mem():
         data = request.get_json()
         if not data or "query" not in data:
             return jsonify({"error": "query is required"}), 400
 
-        results = memory.search(
+        results = memory.search_memory(
             query=data["query"],
+            scene=data.get("scene", ""),
             agent_id=data.get("agent_id", ""),
-            limit=data.get("limit", data.get("top_k", 10)),
+            limit=data.get("limit", 10),
         )
         return jsonify({"results": results})
 
+    @app.route("/memory/recall", methods=["POST"])
+    @app.route("/api/memories/recall", methods=["POST"])
+    def recall_mem():
+        data = request.get_json()
+        if not data or "query" not in data:
+            return jsonify({"error": "query is required"}), 400
+
+        result = memory.recall_context(
+            query=data["query"],
+            scene=data.get("scene", ""),
+            agent_id=data.get("agent_id", ""),
+            limit=data.get("limit", 5),
+            mode=data.get("mode", "kv"),
+        )
+        return jsonify(result)
+
     @app.route("/memory/scenes", methods=["GET"])
-    def list_scenes():
+    def scenes():
         agent_id = request.args.get("agent_id", "")
-        scene_names = memory.scenes(agent_id=agent_id)
+        scene_names = memory.list_scenes(agent_id=agent_id)
         return jsonify({"scenes": scene_names})
+
+    @app.route("/memory/governance", methods=["POST"])
+    @app.route("/api/maintain", methods=["POST"])
+    def governance():
+        data = request.get_json() or {}
+        operation = data.get("operation", "cleanup")
+        result = memory.memory_governance(operation=operation)
+        return jsonify(result)
 
     @app.route("/memory/<memory_id>", methods=["DELETE"])
     def delete_memory(memory_id):
@@ -163,13 +153,14 @@ def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
         if not data or "query" not in data:
             return jsonify({"error": "query is required"}), 400
 
-        memory_context = memory.context(
+        result = memory.recall_context(
             query=data["query"],
-            agent_id=data.get("agent_id", ""),
             scene=data.get("scene", ""),
+            agent_id=data.get("agent_id", ""),
             limit=data.get("limit", 3),
+            mode="kv",
         )
-        return jsonify({"memory_context": memory_context})
+        return jsonify({"memory_context": result.get("context", [])})
 
     @app.route("/memory/reconstruct", methods=["POST"])
     @app.route("/api/memories/reconstruct", methods=["POST"])
@@ -185,13 +176,8 @@ def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
         )
         return jsonify(result)
 
-    @app.route("/api/maintain", methods=["POST"])
-    def maintain():
-        result = memory.maintain()
-        return jsonify(result)
-
     @app.route("/api/stats")
-    def stats():
+    def api_stats():
         return jsonify(memory.stats())
 
     return app

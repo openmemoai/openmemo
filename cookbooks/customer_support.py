@@ -9,77 +9,52 @@ Usage:
     python cookbooks/customer_support.py
 """
 
-from openmemo import MemoryClient
+from openmemo import OpenMemo
 
-mem = MemoryClient(db_path="support_agent.db")
+memo = OpenMemo(db_path="support_agent.db")
 
 AGENT_ID = "support_agent"
 
-mem.write(
+memo.write_memory(
     "Customer John (ID: C-1001) prefers email communication",
-    agent_id=AGENT_ID,
     scene="customer_c1001",
-    cell_type="preference",
+    memory_type="preference",
+    agent_id=AGENT_ID,
 )
 
-mem.write(
+memo.write_memory(
     "John reported login issues on 2024-01-15, resolved by resetting password",
-    agent_id=AGENT_ID,
     scene="customer_c1001",
-    cell_type="fact",
-)
-
-mem.write(
-    "John is on the Pro plan, renewed last month",
+    memory_type="fact",
     agent_id=AGENT_ID,
-    scene="customer_c1001",
-    cell_type="fact",
 )
 
-mem.write(
-    "Customer Sarah (ID: C-1002) prefers phone support",
-    agent_id=AGENT_ID,
-    scene="customer_c1002",
-    cell_type="preference",
-)
-
-mem.write(
-    "Sarah had billing dispute in December, issued $50 credit",
-    agent_id=AGENT_ID,
-    scene="customer_c1002",
-    cell_type="decision",
-)
-
-mem.write(
+memo.write_memory(
     "Do not offer more than $100 credit without manager approval",
-    agent_id=AGENT_ID,
     scene="policies",
-    cell_type="constraint",
+    memory_type="constraint",
+    confidence=1.0,
+    agent_id=AGENT_ID,
 )
 
-print("=== Looking up John's history (KV mode) ===")
-result = mem.recall(
+print("=== recall_context: John's history ===")
+result = memo.recall_context(
     "What issues has John had?",
-    agent_id=AGENT_ID,
     scene="customer_c1001",
-    mode="kv",
-)
-for m in result["memories"]:
-    print(f"  - {m}")
-
-print("\n=== Checking credit policies ===")
-context = mem.context(
-    "credit limit policy",
     agent_id=AGENT_ID,
-    limit=3,
 )
-for c in context:
+for c in result["context"]:
     print(f"  - {c}")
 
-print("\n=== All scenes ===")
-scenes = mem.scenes(agent_id=AGENT_ID)
+print("\n=== search_memory: credit policies ===")
+results = memo.search_memory("credit limit policy", agent_id=AGENT_ID)
+for r in results:
+    print(f"  - {r['content']}")
+
+print("\n=== list_scenes ===")
+scenes = memo.list_scenes(agent_id=AGENT_ID)
 for s in scenes:
     print(f"  - {s}")
 
-mem.close()
+memo.close()
 print("\nDone!")

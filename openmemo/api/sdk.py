@@ -1,22 +1,19 @@
 """
-OpenMemo SDK - Simple Python API.
+OpenMemo SDK — Memory Core API v1.0
 
 Usage:
-    from openmemo import Memory
+    from openmemo import OpenMemo
 
-    memory = Memory()
-    memory.write("User prefers dark mode", agent_id="agent_1", scene="preferences")
-    results = memory.recall("user preference", agent_id="agent_1")
-    print(results)
+    memo = OpenMemo()
+    memo.write_memory("User prefers Python backend", scene="coding", memory_type="preference")
+    result = memo.recall_context("programming language", scene="coding")
+    print(result)  # {"context": ["User prefers Python backend"]}
 
-    # Or use MemoryClient alias
-    from openmemo import MemoryClient
-    mem = MemoryClient()
-    mem.write("User prefers Python")
-    mem.recall("Which language?")
+Aliases:
+    Memory, MemoryClient — same as OpenMemo
 """
 
-from typing import List, Callable, Union
+from typing import List, Callable
 
 from openmemo.config import OpenMemoConfig
 from openmemo.core.memory import Note
@@ -37,8 +34,12 @@ class Memory:
     """
     The main entry point for OpenMemo.
 
-    Provides a simple API for writing, recalling, searching,
-    and managing memories.
+    Provides 5 core APIs:
+        write_memory()       — Write a memory
+        search_memory()      — Basic search
+        recall_context()     — Agent reasoning context (most important)
+        list_scenes()        — List memory scenes
+        memory_governance()  — Memory cleanup & governance
 
     Args:
         db_path: Path to SQLite database file. Default: "openmemo.db"
@@ -75,16 +76,192 @@ class Memory:
         self.conflict_detector = ConflictDetector(config=self._config.governance)
         self.version_manager = VersionManager()
 
+    # ─── Core API 1: write_memory ───
+
+    def write_memory(self, content: str, scene: str = "",
+                     memory_type: str = "fact", confidence: float = 0.8,
+                     agent_id: str = "", metadata: dict = None) -> str:
+        return self._write_impl(
+            content=content, scene=scene, cell_type=memory_type,
+            confidence=confidence, agent_id=agent_id,
+            source="manual", metadata=metadata,
+        )
+
+    # ─── Core API 2: search_memory ───
+
+    def search_memory(self, query: str, scene: str = "",
+                      agent_id: str = "", limit: int = 10) -> List[dict]:
+        results = self.recall_engine.recall(
+            query, top_k=limit, budget=50000,
+            agent_id=agent_id or None, scene=scene or None,
+        )
+        return [
+            {
+                "content": r.content,
+                "score": r.score,
+                "cell_id": r.cell_id,
+            }
+            for r in results
+        ]
+
+    # ─── Core API 3: recall_context (most important) ───
+
+    def recall_context(self, query: str, scene: str = "",
+                       agent_id: str = "", limit: int = 5,
+                       mode: str = "kv") -> dict:
+        if mode == "narrative":
+            result = self.reconstructor.reconstruct(
+                query, max_sources=limit,
+                agent_id=agent_id or None,
+            )
+            return {
+                "memory_story": result.narrative,
+                "sources": result.sources,
+                "confidence": result.confidence,
+            }
+
+        if mode == "raw":
+            return {
+                "context": self._recall_raw_impl(
+                    query, agent_id=agent_id, scene=scene,
+                    top_k=limit,
+                ),
+            }
+
+        results = self.recall_engine.recall(
+            query, top_k=limit, budget=2000,
+            agent_id=agent_id or None, scene=scene or None,
+        )
+
+        for r in results:
+            cell = self.store.get_cell(r.cell_id)
+            if cell:
+                cell_obj = MemCell.from_dict(cell)
+                cell_obj.access()
+                self.store.put_cell(cell_obj.to_dict())
+
+        return {
+            "context": [r.content for r in results],
+        }
+
+    # ─── Core API 4: list_scenes ───
+
+    def list_scenes(self, agent_id: str = "") -> List[str]:
+        raw_scenes = self.store.list_scenes(agent_id=agent_id or None)
+        return [s.get("title", "") for s in raw_scenes if s.get("title")]
+
+    # ─── Core API 5: memory_governance ───
+
+    def memory_governance(self, operation: str = "cleanup") -> dict:
+        cells = self.store.list_cells(limit=500)
+
+        if operation == "dedupe":
+            return self._governance_dedupe(cells)
+        elif operation == "merge":
+            return self._governance_merge(cells)
+        elif operation == "decay":
+            return self._governance_decay(cells)
+        elif operation == "cleanup":
+            return self._governance_cleanup(cells)
+        else:
+            return {"error": f"Unknown operation: {operation}"}
+
+    # ─── Backward-compatible aliases ───
+
     def write(self, content: str, agent_id: str = "", scene: str = "",
               cell_type: str = "fact", source: str = "manual",
               metadata: dict = None) -> str:
-        return self.add(
-            content=content, source=source, agent_id=agent_id,
-            scene=scene, cell_type=cell_type, metadata=metadata,
+        return self._write_impl(
+            content=content, scene=scene, cell_type=cell_type,
+            confidence=0.8, agent_id=agent_id,
+            source=source, metadata=metadata,
         )
 
     def add(self, content: str, source: str = "manual", agent_id: str = "",
             scene: str = "", cell_type: str = "fact", metadata: dict = None) -> str:
+        return self._write_impl(
+            content=content, scene=scene, cell_type=cell_type,
+            confidence=0.8, agent_id=agent_id,
+            source=source, metadata=metadata,
+        )
+
+    def recall(self, query: str, agent_id: str = "", scene: str = "",
+               mode: str = "kv", top_k: int = None, limit: int = None,
+               budget: int = 2000) -> dict:
+        effective_limit = limit or top_k or 5
+        return self.recall_context(
+            query=query, scene=scene, agent_id=agent_id,
+            limit=effective_limit, mode=mode,
+        )
+
+    def recall_raw(self, query: str, agent_id: str = "", scene: str = "",
+                   top_k: int = 10, budget: int = 2000) -> List[dict]:
+        return self._recall_raw_impl(query, agent_id, scene, top_k, budget)
+
+    def search(self, query: str, agent_id: str = "",
+               top_k: int = None, limit: int = None) -> List[dict]:
+        effective_limit = limit or top_k or 10
+        return self.search_memory(query, agent_id=agent_id, limit=effective_limit)
+
+    def context(self, query: str, agent_id: str = "", scene: str = "",
+                limit: int = 3) -> List[str]:
+        result = self.recall_context(query, scene=scene, agent_id=agent_id, limit=limit)
+        return result.get("context", [])
+
+    def scenes(self, agent_id: str = "") -> List[str]:
+        return self.list_scenes(agent_id=agent_id)
+
+    def scenes_detail(self, agent_id: str = "") -> List[dict]:
+        return self.store.list_scenes(agent_id=agent_id or None)
+
+    def maintain(self) -> dict:
+        return self.memory_governance("cleanup")
+
+    def reconstruct(self, query: str, agent_id: str = "", max_sources: int = 10) -> dict:
+        result = self.reconstructor.reconstruct(
+            query, max_sources=max_sources,
+            agent_id=agent_id or None,
+        )
+        return {
+            "query": result.query,
+            "narrative": result.narrative,
+            "sources": result.sources,
+            "confidence": result.confidence,
+        }
+
+    def delete(self, memory_id: str) -> bool:
+        cell_deleted = self.store.delete_cell(memory_id)
+        if cell_deleted:
+            return True
+        return self.store.delete_note(memory_id)
+
+    def stats(self) -> dict:
+        notes = self.store.list_notes(limit=10000)
+        cells = self.store.list_cells(limit=10000)
+        scenes_list = self.store.list_scenes(limit=10000)
+        skills = self.store.list_skills()
+
+        stage_counts = {}
+        for c in cells:
+            stage = c.get("stage", "unknown")
+            stage_counts[stage] = stage_counts.get(stage, 0) + 1
+
+        conflicts = self.conflict_detector.get_unresolved()
+
+        return {
+            "notes": len(notes),
+            "cells": len(cells),
+            "scenes": len(scenes_list),
+            "skills": len(skills),
+            "stages": stage_counts,
+            "unresolved_conflicts": len(conflicts),
+        }
+
+    # ─── Internal implementations ───
+
+    def _write_impl(self, content: str, scene: str, cell_type: str,
+                    confidence: float, agent_id: str,
+                    source: str, metadata: dict) -> str:
         from openmemo._internal import get_evolution_params
 
         note = Note(content=content, source=source, metadata=metadata or {})
@@ -93,15 +270,17 @@ class Memory:
         note_dict["scene"] = scene
         self.store.put_note(note_dict)
 
+        importance = confidence if confidence else get_evolution_params()["default_importance"]
         cell = MemCell(
             note_id=note.id,
             content=content,
             cell_type=cell_type,
             stage=LifecycleStage.EXPLORATION,
-            importance=get_evolution_params()["default_importance"],
+            importance=importance,
             agent_id=agent_id,
             scene=scene,
         )
+        cell.metadata["confidence"] = confidence
 
         existing_cells = self.store.list_cells(limit=50, agent_id=agent_id or None)
         conflicts = self.conflict_detector.detect(cell.to_dict(), existing_cells)
@@ -124,40 +303,8 @@ class Memory:
 
         return note.id
 
-    def recall(self, query: str, agent_id: str = "", scene: str = "",
-               mode: str = "kv", top_k: int = None, limit: int = None,
-               budget: int = 2000) -> Union[dict, List[dict]]:
-        effective_limit = limit or top_k or 10
-
-        if mode == "narrative":
-            result = self.reconstructor.reconstruct(
-                query, max_sources=effective_limit,
-                agent_id=agent_id or None,
-            )
-            return {
-                "memory_story": result.narrative,
-                "sources": result.sources,
-                "confidence": result.confidence,
-            }
-
-        results = self.recall_engine.recall(
-            query, top_k=effective_limit, budget=budget,
-            agent_id=agent_id or None, scene=scene or None,
-        )
-
-        for r in results:
-            cell = self.store.get_cell(r.cell_id)
-            if cell:
-                cell_obj = MemCell.from_dict(cell)
-                cell_obj.access()
-                self.store.put_cell(cell_obj.to_dict())
-
-        return {
-            "memories": [r.content for r in results],
-        }
-
-    def recall_raw(self, query: str, agent_id: str = "", scene: str = "",
-                   top_k: int = 10, budget: int = 2000) -> List[dict]:
+    def _recall_raw_impl(self, query: str, agent_id: str = "", scene: str = "",
+                         top_k: int = 10, budget: int = 2000) -> List[dict]:
         results = self.recall_engine.recall(
             query, top_k=top_k, budget=budget,
             agent_id=agent_id or None, scene=scene or None,
@@ -180,87 +327,6 @@ class Memory:
             for r in results
         ]
 
-    def search(self, query: str, agent_id: str = "",
-               top_k: int = None, limit: int = None) -> List[dict]:
-        effective_limit = limit or top_k or 10
-        results = self.recall_engine.recall(
-            query, top_k=effective_limit, budget=50000,
-            agent_id=agent_id or None,
-        )
-        return [
-            {
-                "content": r.content,
-                "score": r.score,
-                "cell_id": r.cell_id,
-            }
-            for r in results
-        ]
-
-    def context(self, query: str, agent_id: str = "", scene: str = "",
-                limit: int = 3) -> List[str]:
-        results = self.recall_engine.recall(
-            query, top_k=limit, budget=2000,
-            agent_id=agent_id or None, scene=scene or None,
-        )
-        return [r.content for r in results]
-
-    def reconstruct(self, query: str, agent_id: str = "", max_sources: int = 10) -> dict:
-        result = self.reconstructor.reconstruct(
-            query, max_sources=max_sources,
-            agent_id=agent_id or None,
-        )
-        return {
-            "query": result.query,
-            "narrative": result.narrative,
-            "sources": result.sources,
-            "confidence": result.confidence,
-        }
-
-    def scenes(self, agent_id: str = "") -> List[str]:
-        raw_scenes = self.store.list_scenes(agent_id=agent_id or None)
-        return [s.get("title", "") for s in raw_scenes if s.get("title")]
-
-    def scenes_detail(self, agent_id: str = "") -> List[dict]:
-        return self.store.list_scenes(agent_id=agent_id or None)
-
-    def delete(self, memory_id: str) -> bool:
-        cell_deleted = self.store.delete_cell(memory_id)
-        if cell_deleted:
-            return True
-        return self.store.delete_note(memory_id)
-
-    def maintain(self) -> dict:
-        cells = self.store.list_cells(limit=500)
-        pyramid_result = self.pyramid.process(cells)
-        skills = self.skill_engine.extract_skills()
-        return {
-            "pyramid": pyramid_result,
-            "new_skills": len(skills),
-            "total_cells": len(cells),
-        }
-
-    def stats(self) -> dict:
-        notes = self.store.list_notes(limit=10000)
-        cells = self.store.list_cells(limit=10000)
-        scenes = self.store.list_scenes(limit=10000)
-        skills = self.store.list_skills()
-
-        stage_counts = {}
-        for c in cells:
-            stage = c.get("stage", "unknown")
-            stage_counts[stage] = stage_counts.get(stage, 0) + 1
-
-        conflicts = self.conflict_detector.get_unresolved()
-
-        return {
-            "notes": len(notes),
-            "cells": len(cells),
-            "scenes": len(scenes),
-            "skills": len(skills),
-            "stages": stage_counts,
-            "unresolved_conflicts": len(conflicts),
-        }
-
     def _ensure_scene(self, scene_name: str, cell_id: str, agent_id: str = ""):
         all_scenes = self.store.list_scenes(agent_id=agent_id or None)
         for s in all_scenes:
@@ -276,6 +342,61 @@ class Memory:
         scene_dict["agent_id"] = agent_id
         self.store.put_scene(scene_dict)
 
+    def _governance_dedupe(self, cells: list) -> dict:
+        seen = {}
+        duplicates = []
+        for c in cells:
+            content = c.get("content", "").strip().lower()
+            if content in seen:
+                duplicates.append(c["id"])
+                self.store.delete_cell(c["id"])
+            else:
+                seen[content] = c["id"]
+        return {
+            "operation": "dedupe",
+            "duplicates_removed": len(duplicates),
+            "total_cells": len(cells),
+        }
+
+    def _governance_merge(self, cells: list) -> dict:
+        pyramid_result = self.pyramid.process(cells)
+        return {
+            "operation": "merge",
+            "pyramid": pyramid_result,
+            "total_cells": len(cells),
+        }
+
+    def _governance_decay(self, cells: list) -> dict:
+        import time
+        now = time.time()
+        decayed = 0
+        for c in cells:
+            last_access = c.get("last_access", c.get("created_at", now))
+            age_days = (now - last_access) / 86400
+            if age_days > 30:
+                cell_obj = MemCell.from_dict(c)
+                cell_obj.importance = max(0.1, cell_obj.importance * 0.9)
+                self.store.put_cell(cell_obj.to_dict())
+                decayed += 1
+        return {
+            "operation": "decay",
+            "decayed_cells": decayed,
+            "total_cells": len(cells),
+        }
+
+    def _governance_cleanup(self, cells: list) -> dict:
+        dedupe_result = self._governance_dedupe(cells)
+        remaining_cells = self.store.list_cells(limit=500)
+        merge_result = self._governance_merge(remaining_cells)
+        skills = self.skill_engine.extract_skills()
+        return {
+            "operation": "cleanup",
+            "duplicates_removed": dedupe_result["duplicates_removed"],
+            "pyramid": merge_result["pyramid"],
+            "new_skills": len(skills),
+            "total_cells": len(remaining_cells),
+        }
+
     def close(self):
         self.store.close()
 
@@ -286,4 +407,5 @@ class Memory:
         self.close()
 
 
+OpenMemo = Memory
 MemoryClient = Memory

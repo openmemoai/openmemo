@@ -17,16 +17,6 @@ Usage (remote):
 
 
 class OpenMemoMCPServer:
-    """
-    MCP tool server backed by OpenMemo.
-
-    Args:
-        db_path: Local database path (local mode only). Default: "openmemo.db"
-        memory: Pre-configured Memory or RemoteMemory instance.
-        base_url: Remote API URL. If provided, uses remote mode.
-        api_key: API key for remote authentication (future use).
-    """
-
     def __init__(self, db_path: str = "openmemo.db", memory=None,
                  base_url: str = None, api_key: str = None):
         if memory:
@@ -41,78 +31,95 @@ class OpenMemoMCPServer:
     def get_tools(self):
         return [
             {
-                "name": "memory_write",
-                "description": "Store a memory for later recall. Use this to remember facts, decisions, preferences, or observations.",
+                "name": "write_memory",
+                "description": "Store a memory. Use this to remember facts, decisions, preferences, or observations.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "content": {"type": "string", "description": "The memory content to store"},
+                        "scene": {"type": "string", "description": "Context scene (e.g., 'coding', 'deployment')"},
+                        "memory_type": {"type": "string", "enum": ["fact", "decision", "preference", "constraint", "observation"]},
+                        "confidence": {"type": "number", "description": "Confidence level 0-1", "default": 0.8},
                         "agent_id": {"type": "string", "description": "Agent identifier"},
-                        "scene": {"type": "string", "description": "Context scene (e.g., 'coding', 'planning')"},
-                        "cell_type": {"type": "string", "enum": ["fact", "decision", "preference", "constraint", "observation"]},
                     },
                     "required": ["content"],
                 },
             },
             {
-                "name": "memory_recall",
-                "description": "Recall relevant memories based on a query. Returns contextually relevant past memories.",
+                "name": "recall_context",
+                "description": "Recall relevant memories for agent reasoning. Returns contextually relevant past memories.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "query": {"type": "string", "description": "What to recall"},
-                        "agent_id": {"type": "string", "description": "Agent identifier"},
                         "scene": {"type": "string", "description": "Filter by scene"},
-                        "mode": {"type": "string", "enum": ["kv", "narrative"], "description": "Recall mode: kv for key-value pairs, narrative for story"},
+                        "mode": {"type": "string", "enum": ["kv", "narrative", "raw"], "description": "Recall mode"},
                         "limit": {"type": "integer", "description": "Max results", "default": 5},
+                        "agent_id": {"type": "string", "description": "Agent identifier"},
                     },
                     "required": ["query"],
                 },
             },
             {
-                "name": "memory_context",
-                "description": "Get memory context for prompt injection. Returns a list of relevant memories as strings.",
+                "name": "search_memory",
+                "description": "Search memories by query. Returns scored results.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "query": {"type": "string", "description": "Context query"},
-                        "agent_id": {"type": "string", "description": "Agent identifier"},
+                        "query": {"type": "string", "description": "Search query"},
                         "scene": {"type": "string", "description": "Filter by scene"},
-                        "limit": {"type": "integer", "description": "Max context items", "default": 3},
+                        "limit": {"type": "integer", "description": "Max results", "default": 10},
+                        "agent_id": {"type": "string", "description": "Agent identifier"},
                     },
                     "required": ["query"],
+                },
+            },
+            {
+                "name": "list_scenes",
+                "description": "List all memory scenes.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "agent_id": {"type": "string", "description": "Agent identifier"},
+                    },
                 },
             },
         ]
 
     def handle_tool(self, tool_name: str, arguments: dict) -> dict:
-        if tool_name == "memory_write":
-            memory_id = self.memory.write(
+        if tool_name == "write_memory":
+            memory_id = self.memory.write_memory(
                 content=arguments["content"],
-                agent_id=arguments.get("agent_id", ""),
                 scene=arguments.get("scene", ""),
-                cell_type=arguments.get("cell_type", "fact"),
+                memory_type=arguments.get("memory_type", "fact"),
+                confidence=arguments.get("confidence", 0.8),
+                agent_id=arguments.get("agent_id", ""),
             )
             return {"memory_id": memory_id, "status": "stored"}
 
-        elif tool_name == "memory_recall":
-            result = self.memory.recall(
+        elif tool_name == "recall_context":
+            return self.memory.recall_context(
                 query=arguments["query"],
-                agent_id=arguments.get("agent_id", ""),
                 scene=arguments.get("scene", ""),
+                agent_id=arguments.get("agent_id", ""),
                 mode=arguments.get("mode", "kv"),
                 limit=arguments.get("limit", 5),
             )
-            return result
 
-        elif tool_name == "memory_context":
-            context = self.memory.context(
+        elif tool_name == "search_memory":
+            results = self.memory.search_memory(
                 query=arguments["query"],
-                agent_id=arguments.get("agent_id", ""),
                 scene=arguments.get("scene", ""),
-                limit=arguments.get("limit", 3),
+                agent_id=arguments.get("agent_id", ""),
+                limit=arguments.get("limit", 10),
             )
-            return {"memory_context": context}
+            return {"results": results}
+
+        elif tool_name == "list_scenes":
+            scenes = self.memory.list_scenes(
+                agent_id=arguments.get("agent_id", ""),
+            )
+            return {"scenes": scenes}
 
         return {"error": f"Unknown tool: {tool_name}"}
 

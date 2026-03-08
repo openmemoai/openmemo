@@ -22,18 +22,6 @@ from typing import Any, Dict, List
 
 
 class OpenMemoMemory:
-    """
-    LangChain-compatible memory backend powered by OpenMemo.
-
-    Args:
-        db_path: Local database path (local mode only). Default: "openmemo.db"
-        agent_id: Agent identifier for memory isolation.
-        memory: Pre-configured Memory or RemoteMemory instance.
-        memory_key: Key used in LangChain memory variables. Default: "history"
-        base_url: Remote API URL. If provided, uses remote mode.
-        api_key: API key for remote authentication (future use).
-    """
-
     memory_key: str = "history"
 
     def __init__(self, db_path: str = "openmemo.db", agent_id: str = "",
@@ -60,12 +48,14 @@ class OpenMemoMemory:
         if not query:
             return {self.memory_key: ""}
 
-        context = self._memory.context(
+        result = self._memory.recall_context(
             query=query,
             agent_id=self.agent_id,
             limit=5,
+            mode="kv",
         )
 
+        context = result.get("context", [])
         if not context:
             return {self.memory_key: ""}
 
@@ -76,19 +66,19 @@ class OpenMemoMemory:
         ai_output = outputs.get("output", "")
 
         if user_input:
-            self._memory.write(
+            self._memory.write_memory(
                 content=f"User: {user_input}",
-                agent_id=self.agent_id,
                 scene="conversation",
-                cell_type="observation",
+                memory_type="observation",
+                agent_id=self.agent_id,
             )
 
         if ai_output:
-            self._memory.write(
+            self._memory.write_memory(
                 content=f"Assistant: {ai_output}",
-                agent_id=self.agent_id,
                 scene="conversation",
-                cell_type="observation",
+                memory_type="observation",
+                agent_id=self.agent_id,
             )
 
     def clear(self) -> None:
