@@ -33,8 +33,11 @@ def _migration_v1_to_v2(conn: sqlite3.Connection) -> None:
     for table, column, col_def in alterations:
         try:
             cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_def}")
-        except sqlite3.OperationalError:
-            pass
+        except sqlite3.OperationalError as e:
+            if "duplicate column" in str(e).lower():
+                pass
+            else:
+                raise
 
     conn.commit()
 

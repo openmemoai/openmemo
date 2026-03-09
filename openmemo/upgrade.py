@@ -12,11 +12,12 @@ import subprocess
 
 REMOTE_VERSION_URL = "https://api.openmemo.ai/version"
 
-SCHEMA_VERSION = 2
+LATEST_SCHEMA_VERSION = 2
 
 
-def get_local_versions():
+def get_local_versions(db_path: str = None):
     """Return dict with local core version, adapter version, and schema version."""
+    import os
     core_version = None
     adapter_version = None
 
@@ -30,10 +31,20 @@ def get_local_versions():
     except importlib.metadata.PackageNotFoundError:
         pass
 
+    schema_version = LATEST_SCHEMA_VERSION
+    effective_db = db_path or os.environ.get("OPENMEMO_DB", "openmemo.db")
+    if os.path.exists(effective_db):
+        try:
+            from openmemo.migration import SchemaMigrator
+            migrator = SchemaMigrator(effective_db)
+            schema_version = migrator.get_schema_version()
+        except Exception:
+            pass
+
     return {
         "core": core_version,
         "adapter": adapter_version,
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": schema_version,
     }
 
 
