@@ -221,25 +221,36 @@ async function fetchJSON(url) {
   try { const r = await fetch(API + url); return await r.json(); } catch(e) { return null; }
 }
 
+function safeClass(s) { return (s || '').replace(/[^a-zA-Z0-9_-]/g, ''); }
+
 function typeIcon(t) {
   const map = { preference: '&#x2764;', task_execution: '&#x26A1;', fact: '&#x1F4CC;', decision: '&#x2696;', observation: '&#x1F441;' };
-  return map[t] || '&#x1F4AD;';
+  return map[safeClass(t)] || '&#x1F4AD;';
+}
+
+function statusDisplay(s) {
+  if (s === 'ok') return { text: '&#x2713; Healthy', color: 'var(--green)', sub: 'all checks passed' };
+  if (s === 'warning') return { text: '! Warning', color: 'var(--amber)', sub: 'some checks need attention' };
+  if (s === 'fail' || s === 'error') return { text: '&#x2717; Unhealthy', color: 'var(--red)', sub: 'system issues detected' };
+  return { text: escapeHtml(s || '-'), color: 'var(--text-muted)', sub: 'status unknown' };
 }
 
 function renderHero(memories, cells, scenes, status) {
+  const sd = statusDisplay(status);
   document.getElementById('hero-stats').innerHTML =
-    '<div class="hero-card"><div class="hero-label">Total Memories</div><div class="hero-value">' + memories + '</div><div class="hero-sub">stored memory entries</div><div class="hero-icon blue">&#x1F9E0;</div></div>' +
-    '<div class="hero-card"><div class="hero-label">Memory Cells</div><div class="hero-value">' + cells + '</div><div class="hero-sub">atomic knowledge units</div><div class="hero-icon purple">&#x2B21;</div></div>' +
-    '<div class="hero-card"><div class="hero-label">Active Scenes</div><div class="hero-value">' + scenes + '</div><div class="hero-sub">context groups</div><div class="hero-icon green">&#x1F3AF;</div></div>' +
-    '<div class="hero-card"><div class="hero-label">System Status</div><div class="hero-value" style="color:var(--green)">' + (status === 'ok' ? '&#x2713; Healthy' : status) + '</div><div class="hero-sub">all checks passed</div><div class="hero-icon amber">&#x2699;</div></div>';
+    '<div class="hero-card"><div class="hero-label">Total Memories</div><div class="hero-value">' + parseInt(memories)||0 + '</div><div class="hero-sub">stored memory entries</div><div class="hero-icon blue">&#x1F9E0;</div></div>' +
+    '<div class="hero-card"><div class="hero-label">Memory Cells</div><div class="hero-value">' + parseInt(cells)||0 + '</div><div class="hero-sub">atomic knowledge units</div><div class="hero-icon purple">&#x2B21;</div></div>' +
+    '<div class="hero-card"><div class="hero-label">Active Scenes</div><div class="hero-value">' + parseInt(scenes)||0 + '</div><div class="hero-sub">context groups</div><div class="hero-icon green">&#x1F3AF;</div></div>' +
+    '<div class="hero-card"><div class="hero-label">System Status</div><div class="hero-value" style="color:' + sd.color + '">' + sd.text + '</div><div class="hero-sub">' + sd.sub + '</div><div class="hero-icon amber">&#x2699;</div></div>';
 }
 
 async function loadChecklist() {
   const d = await fetchJSON('/api/inspector/checklist');
   if (!d) { document.getElementById('checklist').innerHTML = '<div class="empty-state"><div class="empty-icon">&#x26A0;</div>Could not load</div>'; return; }
   document.getElementById('checklist').innerHTML = d.checks.map(c => {
-    const icon = c.status === 'ok' ? '&#x2713;' : c.status === 'warning' ? '!' : c.status === 'cold_start' ? '&#x25CB;' : '&#x2717;';
-    return '<div class="check-item ' + c.status + '"><div class="check-icon ' + c.status + '">' + icon + '</div><span class="check-label">' + c.name + '</span></div>';
+    const st = safeClass(c.status);
+    const icon = st === 'ok' ? '&#x2713;' : st === 'warning' ? '!' : st === 'cold_start' ? '&#x25CB;' : '&#x2717;';
+    return '<div class="check-item ' + st + '"><div class="check-icon ' + st + '">' + icon + '</div><span class="check-label">' + escapeHtml(c.name) + '</span></div>';
   }).join('');
 }
 
@@ -252,15 +263,15 @@ async function loadSummary() {
   if (d.type_distribution && Object.keys(d.type_distribution).length > 0) {
     const maxT = Math.max(...Object.values(d.type_distribution), 1);
     document.getElementById('type-dist').innerHTML = Object.entries(d.type_distribution).map(([k,v]) =>
-      '<div class="dist-row"><span class="dist-label">' + k + '</span><div class="dist-track"><div class="dist-fill type" style="width:' + ((v/maxT)*100) + '%"></div></div><span class="dist-count">' + v + '</span></div>'
+      '<div class="dist-row"><span class="dist-label">' + escapeHtml(k) + '</span><div class="dist-track"><div class="dist-fill type" style="width:' + (parseFloat(v/maxT)*100) + '%"></div></div><span class="dist-count">' + parseInt(v) + '</span></div>'
     ).join('');
-  }
+  } else { document.getElementById('type-dist').innerHTML = '<div class="empty-state">No data yet</div>'; }
   if (d.scene_distribution && Object.keys(d.scene_distribution).length > 0) {
     const maxS = Math.max(...Object.values(d.scene_distribution), 1);
     document.getElementById('scene-dist').innerHTML = Object.entries(d.scene_distribution).map(([k,v]) =>
-      '<div class="dist-row"><span class="dist-label">' + (k||'(none)') + '</span><div class="dist-track"><div class="dist-fill scene" style="width:' + ((v/maxS)*100) + '%"></div></div><span class="dist-count">' + v + '</span></div>'
+      '<div class="dist-row"><span class="dist-label">' + escapeHtml(k||'(none)') + '</span><div class="dist-track"><div class="dist-fill scene" style="width:' + (parseFloat(v/maxS)*100) + '%"></div></div><span class="dist-count">' + parseInt(v) + '</span></div>'
     ).join('');
-  }
+  } else { document.getElementById('scene-dist').innerHTML = '<div class="empty-state">No data yet</div>'; }
 }
 
 async function loadHealth() {
@@ -273,19 +284,20 @@ async function loadHealth() {
     ['Engine', d.engine_version || '-'],
     ['Memories', d.total_memories || 0],
     ['Scenes', d.total_scenes || 0],
-  ].map(([k,v]) => '<div class="info-item"><span class="info-label">' + k + '</span><span class="info-value">' + v + '</span></div>').join('');
+  ].map(([k,v]) => '<div class="info-item"><span class="info-label">' + escapeHtml(k) + '</span><span class="info-value">' + escapeHtml(String(v)) + '</span></div>').join('');
 }
 
 function renderTimelineItem(m) {
   const content = m.content || m.text || '';
   const scene = m.scene || '';
   const mtype = m.memory_type || m.cell_type || m.type || '';
-  const score = m.score != null ? m.score.toFixed(2) : '';
+  const score = m.score != null ? parseFloat(m.score).toFixed(2) : '';
+  const safeType = safeClass(mtype);
   let meta = '';
-  if (scene) meta += '<span class="pill scene">' + scene + '</span>';
-  if (mtype) meta += '<span class="pill type">' + mtype + '</span>';
+  if (scene) meta += '<span class="pill scene">' + escapeHtml(scene) + '</span>';
+  if (mtype) meta += '<span class="pill type">' + escapeHtml(mtype) + '</span>';
   if (score) meta += '<span class="pill score">' + score + '</span>';
-  return '<div class="timeline-item"><div class="timeline-dot ' + mtype + '">' + typeIcon(mtype) + '</div><div class="timeline-body"><div class="timeline-content">' + escapeHtml(content.substring(0, 200)) + '</div><div class="timeline-meta">' + meta + '</div></div></div>';
+  return '<div class="timeline-item"><div class="timeline-dot ' + safeType + '">' + typeIcon(safeType) + '</div><div class="timeline-body"><div class="timeline-content">' + escapeHtml(content.substring(0, 200)) + '</div><div class="timeline-meta">' + meta + '</div></div></div>';
 }
 
 async function loadRecent() {
@@ -302,7 +314,7 @@ async function loadVersion() {
     ['OpenMemo Core', d.latest_core],
     ['Adapter', d.latest_adapter],
     ['Schema', 'v' + d.schema_version],
-  ].map(([k,v]) => '<div class="info-item" style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04)"><span class="info-label">' + k + '</span><span class="info-value">' + v + '</span></div>').join('');
+  ].map(([k,v]) => '<div class="info-item" style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04)"><span class="info-label">' + escapeHtml(k) + '</span><span class="info-value">' + escapeHtml(String(v)) + '</span></div>').join('');
   document.getElementById('header-version').textContent = 'v' + d.latest_core;
 }
 
