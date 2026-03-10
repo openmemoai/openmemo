@@ -106,6 +106,8 @@ def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
             confidence=data.get("confidence", 0.8),
             agent_id=data.get("agent_id", ""),
             metadata=data.get("metadata", {}),
+            scope=data.get("scope", ""),
+            conversation_id=data.get("conversation_id", ""),
         )
         return jsonify({"memory_id": memory_id, "status": "stored"}), 201
 
@@ -121,6 +123,7 @@ def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
             scene=data.get("scene", ""),
             agent_id=data.get("agent_id", ""),
             limit=data.get("limit", 10),
+            conversation_id=data.get("conversation_id", ""),
         )
         return jsonify({"results": results})
 
@@ -137,6 +140,7 @@ def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
             agent_id=data.get("agent_id", ""),
             limit=data.get("limit", 5),
             mode=data.get("mode", "kv"),
+            conversation_id=data.get("conversation_id", ""),
         )
         return jsonify(result)
 
@@ -183,6 +187,47 @@ def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
             return jsonify({"error": "name and config are required"}), 400
         memory.register_profile(data["name"], data["config"])
         return jsonify({"status": "registered", "profile": data["name"]}), 201
+
+    @app.route("/agents/register", methods=["POST"])
+    @app.route("/agents", methods=["POST"])
+    def register_agent():
+        data = request.get_json()
+        if not data or "agent_id" not in data:
+            return jsonify({"error": "agent_id is required"}), 400
+        result = memory.register_agent(
+            agent_id=data["agent_id"],
+            agent_type=data.get("agent_type", ""),
+            description=data.get("description", ""),
+        )
+        return jsonify(result), 201
+
+    @app.route("/agents", methods=["GET"])
+    def list_agents():
+        agents = memory.list_agents()
+        return jsonify({"agents": agents})
+
+    @app.route("/conversations", methods=["POST"])
+    def start_conversation():
+        data = request.get_json()
+        if not data or "conversation_id" not in data:
+            return jsonify({"error": "conversation_id is required"}), 400
+        result = memory.start_conversation(
+            conversation_id=data["conversation_id"],
+            agent_id=data.get("agent_id", ""),
+            scene=data.get("scene", ""),
+        )
+        return jsonify(result), 201
+
+    @app.route("/conversations", methods=["GET"])
+    def list_conversations():
+        agent_id = request.args.get("agent_id", "")
+        convs = memory.list_conversations(agent_id=agent_id)
+        return jsonify({"conversations": convs})
+
+    @app.route("/memory/promote", methods=["POST"])
+    def promote_shared():
+        result = memory.promote_shared_memories()
+        return jsonify(result)
 
     @app.route("/memory/<memory_id>", methods=["DELETE"])
     def delete_memory(memory_id):

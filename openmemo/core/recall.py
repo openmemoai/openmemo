@@ -34,7 +34,15 @@ class BM25Strategy(RecallStrategy):
 
         agent_id = kwargs.get("agent_id")
         scene = kwargs.get("scene")
-        all_cells = store.list_cells(agent_id=agent_id, scene=scene)
+        conversation_id = kwargs.get("conversation_id")
+
+        if agent_id and hasattr(store, "list_cells_scoped"):
+            all_cells = store.list_cells_scoped(
+                agent_id=agent_id, conversation_id=conversation_id,
+                scene=scene, limit=500,
+            )
+        else:
+            all_cells = store.list_cells(agent_id=agent_id, scene=scene)
         scored = []
 
         for cell in all_cells:
@@ -75,9 +83,30 @@ class VectorStrategy(RecallStrategy):
         if not self._vector_store or not self._embed_fn:
             return []
 
+        agent_id = kwargs.get("agent_id")
+
         try:
             query_embedding = self._embed_fn(query)
-            results = self._vector_store.search(query_embedding, top_k=top_k)
+            results = self._vector_store.search(query_embedding, top_k=top_k * 3)
+
+            filtered = []
+            for r in results:
+                if agent_id and store:
+                    cell = store.get_cell(r.get("id", ""))
+                    if cell:
+                        scope = cell.get("scope", "private")
+                        cell_agent = cell.get("agent_id", "")
+                        if scope == "shared":
+                            pass
+                        elif scope == "conversation":
+                            conv_id = kwargs.get("conversation_id")
+                            if cell.get("conversation_id", "") != conv_id:
+                                continue
+                        elif scope == "private":
+                            if cell_agent and cell_agent != agent_id:
+                                continue
+                filtered.append(r)
+
             return [
                 RecallResultItem(
                     cell_id=r.get("id", ""),
@@ -85,7 +114,7 @@ class VectorStrategy(RecallStrategy):
                     score=r.get("score", 0.0),
                     source="middle",
                 )
-                for r in results
+                for r in filtered[:top_k]
             ]
         except Exception:
             return []
@@ -149,14 +178,16 @@ class RecallEngine:
         self._constitution = constitution
 
     def recall(self, query: str, top_k: int = 10, budget: int = 2000,
-               agent_id: str = None, scene: str = None) -> List[RecallResult]:
+               agent_id: str = None, scene: str = None,
+               conversation_id: str = None) -> List[RecallResult]:
         all_results = []
+        extra = {"conversation_id": conversation_id} if conversation_id else {}
 
         if self._constitution and self._constitution.should_prefer_scene_local() and scene:
             for strategy in self._strategies:
                 results = strategy.retrieve(
                     query, store=self.store, top_k=top_k * 2,
-                    agent_id=agent_id, scene=scene,
+                    agent_id=agent_id, scene=scene, **extra,
                 )
                 all_results.extend(results)
 
@@ -165,7 +196,7 @@ class RecallEngine:
                 for strategy in self._strategies:
                     results = strategy.retrieve(
                         query, store=self.store, top_k=top_k * 2,
-                        agent_id=agent_id, scene=None,
+                        agent_id=agent_id, scene=None, **extra,
                     )
                     global_results.extend(results)
                 seen_ids = {r.cell_id for r in all_results}
@@ -177,7 +208,7 @@ class RecallEngine:
             for strategy in self._strategies:
                 results = strategy.retrieve(
                     query, store=self.store, top_k=top_k * 2,
-                    agent_id=agent_id, scene=scene,
+                    agent_id=agent_id, scene=scene, **extra,
                 )
                 all_results.extend(results)
 

@@ -113,24 +113,33 @@ class Memory:
     def active_profile(self) -> str:
         return self._registry.active_name
 
+    SHARED_TYPES = {"rules", "playbook", "pattern", "convention", "policy"}
+
     # ─── Core API 1: write_memory ───
 
     def write_memory(self, content: str, scene: str = "",
                      memory_type: str = "fact", confidence: float = 0.8,
-                     agent_id: str = "", metadata: dict = None) -> str:
+                     agent_id: str = "", metadata: dict = None,
+                     scope: str = "", conversation_id: str = "") -> str:
+        effective_scope = scope
+        if not effective_scope:
+            effective_scope = "shared" if memory_type in self.SHARED_TYPES else "private"
         return self._write_impl(
             content=content, scene=scene, cell_type=memory_type,
             confidence=confidence, agent_id=agent_id,
             source="manual", metadata=metadata,
+            scope=effective_scope, conversation_id=conversation_id,
         )
 
     # ─── Core API 2: search_memory ───
 
     def search_memory(self, query: str, scene: str = "",
-                      agent_id: str = "", limit: int = 10) -> List[dict]:
+                      agent_id: str = "", limit: int = 10,
+                      conversation_id: str = "") -> List[dict]:
         results = self.recall_engine.recall(
             query, top_k=limit, budget=50000,
             agent_id=agent_id or None, scene=scene or None,
+            conversation_id=conversation_id or None,
         )
         items = [
             {
@@ -146,7 +155,7 @@ class Memory:
 
     def recall_context(self, query: str, scene: str = "",
                        agent_id: str = "", limit: int = 5,
-                       mode: str = "kv") -> dict:
+                       mode: str = "kv", conversation_id: str = "") -> dict:
         if mode == "narrative":
             result = self.reconstructor.reconstruct(
                 query, max_sources=limit,
@@ -162,13 +171,14 @@ class Memory:
             return {
                 "context": self._recall_raw_impl(
                     query, agent_id=agent_id, scene=scene,
-                    top_k=limit,
+                    top_k=limit, conversation_id=conversation_id,
                 ),
             }
 
         results = self.recall_engine.recall(
             query, top_k=limit, budget=2000,
             agent_id=agent_id or None, scene=scene or None,
+            conversation_id=conversation_id or None,
         )
 
         for r in results:
@@ -203,6 +213,65 @@ class Memory:
             return self._governance_cleanup(cells)
         else:
             return {"error": f"Unknown operation: {operation}"}
+
+    # ─── Agent & Conversation Management ───
+
+    def register_agent(self, agent_id: str, agent_type: str = "",
+                       description: str = "") -> dict:
+        self.store.put_agent({
+            "agent_id": agent_id,
+            "agent_type": agent_type,
+            "description": description,
+        })
+        return {"agent_id": agent_id, "status": "registered"}
+
+    def list_agents(self) -> List[dict]:
+        return self.store.list_agents()
+
+    def start_conversation(self, conversation_id: str, agent_id: str = "",
+                           scene: str = "") -> dict:
+        self.store.put_conversation({
+            "conversation_id": conversation_id,
+            "agent_id": agent_id,
+            "scene": scene,
+        })
+        return {"conversation_id": conversation_id, "status": "started"}
+
+    def list_conversations(self, agent_id: str = "") -> List[dict]:
+        return self.store.list_conversations(agent_id=agent_id or None)
+
+    # ─── Shared Memory Promotion ───
+
+    def promote_shared_memories(self) -> dict:
+        cells = self.store.list_cells(limit=1000)
+        promoted = 0
+        for c in cells:
+            if c.get("scope") == "shared":
+                continue
+            confidence = c.get("metadata", {}).get("confidence", 0.5)
+            access_count = c.get("access_count", 0)
+            if confidence > 0.9 and access_count >= 3:
+                cell_obj = MemCell.from_dict(c)
+                cell_obj.scope = "shared"
+                cell_obj.metadata["promoted_to_shared"] = True
+                self.store.put_cell(cell_obj.to_dict())
+                promoted += 1
+        return {"promoted": promoted}
+
+    def decay_shared_memories(self, max_age_days: int = 90) -> dict:
+        import time
+        now = time.time()
+        cells = self.store.list_cells(limit=1000)
+        decayed = 0
+        for c in cells:
+            if c.get("scope") != "shared":
+                continue
+            last_access = c.get("last_accessed", c.get("created_at", now))
+            age_days = (now - last_access) / 86400
+            if age_days > max_age_days:
+                self.store.delete_cell(c["id"])
+                decayed += 1
+        return {"decayed": decayed}
 
     # ─── Backward-compatible aliases ───
 
@@ -299,7 +368,8 @@ class Memory:
 
     def _write_impl(self, content: str, scene: str, cell_type: str,
                     confidence: float, agent_id: str,
-                    source: str, metadata: dict) -> str:
+                    source: str, metadata: dict,
+                    scope: str = "private", conversation_id: str = "") -> str:
         from openmemo._internal import get_evolution_params
 
         if self.constitution and not self.constitution.should_store(cell_type, content):
@@ -309,6 +379,8 @@ class Memory:
         note_dict = note.to_dict()
         note_dict["agent_id"] = agent_id
         note_dict["scene"] = scene
+        note_dict["scope"] = scope
+        note_dict["conversation_id"] = conversation_id
         self.store.put_note(note_dict)
 
         importance = confidence if confidence else get_evolution_params()["default_importance"]
@@ -325,6 +397,8 @@ class Memory:
             importance=importance,
             agent_id=agent_id,
             scene=scene,
+            scope=scope,
+            conversation_id=conversation_id,
         )
         cell.metadata["confidence"] = confidence
 
@@ -365,10 +439,12 @@ class Memory:
         return note.id
 
     def _recall_raw_impl(self, query: str, agent_id: str = "", scene: str = "",
-                         top_k: int = 10, budget: int = 2000) -> List[dict]:
+                         top_k: int = 10, budget: int = 2000,
+                         conversation_id: str = "") -> List[dict]:
         results = self.recall_engine.recall(
             query, top_k=top_k, budget=budget,
             agent_id=agent_id or None, scene=scene or None,
+            conversation_id=conversation_id or None,
         )
 
         for r in results:
@@ -472,12 +548,17 @@ class Memory:
                     self.store.put_cell(cell_obj.to_dict())
                     promoted += 1
 
+        shared_result = self.promote_shared_memories()
+        decay_result = self.decay_shared_memories()
+
         return {
             "operation": "cleanup",
             "duplicates_removed": dedupe_result["duplicates_removed"],
             "pyramid": merge_result["pyramid"],
             "new_skills": len(skills),
             "promoted": promoted,
+            "shared_promoted": shared_result["promoted"],
+            "shared_decayed": decay_result["decayed"],
             "total_cells": len(remaining_cells),
         }
 

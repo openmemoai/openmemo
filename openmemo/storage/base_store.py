@@ -39,6 +39,10 @@ class BaseStore(ABC):
                    agent_id: str = None, scene: str = None) -> List[dict]:
         pass
 
+    def list_cells_scoped(self, agent_id: str = None, conversation_id: str = None,
+                          scene: str = None, limit: int = 100) -> List[dict]:
+        return self.list_cells(limit=limit, agent_id=agent_id, scene=scene)
+
     @abstractmethod
     def delete_cell(self, cell_id: str) -> bool:
         pass
@@ -62,6 +66,24 @@ class BaseStore(ABC):
     @abstractmethod
     def list_skills(self) -> List[dict]:
         pass
+
+    def put_agent(self, agent: dict) -> str:
+        return agent.get("agent_id", "")
+
+    def get_agent(self, agent_id: str) -> Optional[dict]:
+        return None
+
+    def list_agents(self) -> List[dict]:
+        return []
+
+    def delete_agent(self, agent_id: str) -> bool:
+        return False
+
+    def put_conversation(self, conversation: dict) -> str:
+        return conversation.get("conversation_id", "")
+
+    def list_conversations(self, agent_id: str = None) -> List[dict]:
+        return []
 
     @abstractmethod
     def close(self):

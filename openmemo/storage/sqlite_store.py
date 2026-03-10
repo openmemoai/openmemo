@@ -1,12 +1,13 @@
 """
 SQLite storage backend - the default store.
 
-Stores notes, MemCells, MemScenes, and skills in a local SQLite database.
-Zero configuration, works out of the box.
+Stores notes, MemCells, MemScenes, skills, agents, and conversations
+in a local SQLite database. Zero configuration, works out of the box.
 """
 
 import json
 import sqlite3
+import time
 from typing import List, Optional
 from openmemo.storage.base_store import BaseStore
 
@@ -27,6 +28,8 @@ class SQLiteStore(BaseStore):
                 source TEXT DEFAULT 'manual',
                 agent_id TEXT DEFAULT '',
                 scene TEXT DEFAULT '',
+                scope TEXT DEFAULT 'private',
+                conversation_id TEXT DEFAULT '',
                 timestamp REAL,
                 metadata TEXT DEFAULT '{}'
             );
@@ -44,6 +47,8 @@ class SQLiteStore(BaseStore):
                 created_at REAL,
                 agent_id TEXT DEFAULT '',
                 scene TEXT DEFAULT '',
+                scope TEXT DEFAULT 'private',
+                conversation_id TEXT DEFAULT '',
                 connections TEXT DEFAULT '[]',
                 metadata TEXT DEFAULT '{}'
             );
@@ -79,6 +84,21 @@ class SQLiteStore(BaseStore):
                 created_at REAL,
                 metadata TEXT DEFAULT '{}'
             );
+
+            CREATE TABLE IF NOT EXISTS agents (
+                agent_id TEXT PRIMARY KEY,
+                agent_type TEXT DEFAULT '',
+                description TEXT DEFAULT '',
+                created_at REAL
+            );
+
+            CREATE TABLE IF NOT EXISTS conversations (
+                conversation_id TEXT PRIMARY KEY,
+                agent_id TEXT DEFAULT '',
+                scene TEXT DEFAULT '',
+                started_at REAL,
+                metadata TEXT DEFAULT '{}'
+            );
         """)
         self.conn.commit()
         self._migrate()
@@ -88,9 +108,13 @@ class SQLiteStore(BaseStore):
         for table, col, col_def in [
             ("notes", "agent_id", "TEXT DEFAULT ''"),
             ("notes", "scene", "TEXT DEFAULT ''"),
+            ("notes", "scope", "TEXT DEFAULT 'private'"),
+            ("notes", "conversation_id", "TEXT DEFAULT ''"),
             ("cells", "agent_id", "TEXT DEFAULT ''"),
             ("cells", "scene", "TEXT DEFAULT ''"),
             ("cells", "cell_type", "TEXT DEFAULT 'fact'"),
+            ("cells", "scope", "TEXT DEFAULT 'private'"),
+            ("cells", "conversation_id", "TEXT DEFAULT ''"),
             ("scenes", "agent_id", "TEXT DEFAULT ''"),
         ]:
             try:
@@ -103,9 +127,10 @@ class SQLiteStore(BaseStore):
         note_id = note.get("id", "")
         cursor = self.conn.cursor()
         cursor.execute(
-            "INSERT OR REPLACE INTO notes (id, content, source, agent_id, scene, timestamp, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO notes (id, content, source, agent_id, scene, scope, conversation_id, timestamp, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (note_id, note.get("content", ""), note.get("source", "manual"),
              note.get("agent_id", ""), note.get("scene", ""),
+             note.get("scope", "private"), note.get("conversation_id", ""),
              note.get("timestamp", 0), json.dumps(note.get("metadata", {})))
         )
         self.conn.commit()
@@ -140,14 +165,15 @@ class SQLiteStore(BaseStore):
         cursor.execute(
             """INSERT OR REPLACE INTO cells
             (id, note_id, content, cell_type, facts, stage, importance, access_count,
-             last_accessed, created_at, agent_id, scene, connections, metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             last_accessed, created_at, agent_id, scene, scope, conversation_id, connections, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (cell_id, cell.get("note_id", ""), cell.get("content", ""),
              cell.get("cell_type", "fact"),
              json.dumps(cell.get("facts", [])), cell.get("stage", "exploration"),
              cell.get("importance", 0.5), cell.get("access_count", 0),
              cell.get("last_accessed", 0), cell.get("created_at", 0),
              cell.get("agent_id", ""), cell.get("scene", ""),
+             cell.get("scope", "private"), cell.get("conversation_id", ""),
              json.dumps(cell.get("connections", [])), json.dumps(cell.get("metadata", {})))
         )
         self.conn.commit()
@@ -176,6 +202,34 @@ class SQLiteStore(BaseStore):
         where = " WHERE " + " AND ".join(conditions) if conditions else ""
         params.extend([limit, offset])
         cursor.execute(f"SELECT * FROM cells{where} ORDER BY created_at DESC LIMIT ? OFFSET ?", params)
+        return [self._row_to_cell(row) for row in cursor.fetchall()]
+
+    def list_cells_scoped(self, agent_id: str = None, conversation_id: str = None,
+                          scene: str = None, limit: int = 100) -> List[dict]:
+        cursor = self.conn.cursor()
+        scope_conditions = []
+        params = []
+
+        if agent_id:
+            scope_conditions.append("(agent_id = ? AND scope = 'private')")
+            params.append(agent_id)
+
+        if conversation_id:
+            scope_conditions.append("(conversation_id = ? AND scope = 'conversation')")
+            params.append(conversation_id)
+
+        scope_conditions.append("scope = 'shared'")
+
+        scope_clause = " OR ".join(scope_conditions)
+
+        if scene:
+            where = f" WHERE ({scope_clause}) AND scene = ?"
+            params.append(scene)
+        else:
+            where = f" WHERE ({scope_clause})"
+
+        params.append(limit)
+        cursor.execute(f"SELECT * FROM cells{where} ORDER BY created_at DESC LIMIT ?", params)
         return [self._row_to_cell(row) for row in cursor.fetchall()]
 
     def delete_cell(self, cell_id: str) -> bool:
@@ -237,6 +291,72 @@ class SQLiteStore(BaseStore):
         cursor.execute("SELECT * FROM skills ORDER BY usage_count DESC")
         return [self._row_to_skill(row) for row in cursor.fetchall()]
 
+    def put_agent(self, agent: dict) -> str:
+        agent_id = agent.get("agent_id", "")
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "INSERT OR REPLACE INTO agents (agent_id, agent_type, description, created_at) VALUES (?, ?, ?, ?)",
+            (agent_id, agent.get("agent_type", ""), agent.get("description", ""),
+             agent.get("created_at", time.time()))
+        )
+        self.conn.commit()
+        return agent_id
+
+    def get_agent(self, agent_id: str) -> Optional[dict]:
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM agents WHERE agent_id = ?", (agent_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "agent_id": row["agent_id"],
+            "agent_type": row["agent_type"],
+            "description": row["description"],
+            "created_at": row["created_at"],
+        }
+
+    def list_agents(self) -> List[dict]:
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM agents ORDER BY created_at DESC")
+        return [{
+            "agent_id": row["agent_id"],
+            "agent_type": row["agent_type"],
+            "description": row["description"],
+            "created_at": row["created_at"],
+        } for row in cursor.fetchall()]
+
+    def delete_agent(self, agent_id: str) -> bool:
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM agents WHERE agent_id = ?", (agent_id,))
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def put_conversation(self, conversation: dict) -> str:
+        conv_id = conversation.get("conversation_id", "")
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "INSERT OR REPLACE INTO conversations (conversation_id, agent_id, scene, started_at, metadata) VALUES (?, ?, ?, ?, ?)",
+            (conv_id, conversation.get("agent_id", ""), conversation.get("scene", ""),
+             conversation.get("started_at", time.time()),
+             json.dumps(conversation.get("metadata", {})))
+        )
+        self.conn.commit()
+        return conv_id
+
+    def list_conversations(self, agent_id: str = None) -> List[dict]:
+        cursor = self.conn.cursor()
+        if agent_id:
+            cursor.execute("SELECT * FROM conversations WHERE agent_id = ? ORDER BY started_at DESC", (agent_id,))
+        else:
+            cursor.execute("SELECT * FROM conversations ORDER BY started_at DESC")
+        return [{
+            "conversation_id": row["conversation_id"],
+            "agent_id": row["agent_id"],
+            "scene": row["scene"],
+            "started_at": row["started_at"],
+            "metadata": json.loads(row["metadata"] or "{}"),
+        } for row in cursor.fetchall()]
+
     def close(self):
         self.conn.close()
 
@@ -251,6 +371,12 @@ class SQLiteStore(BaseStore):
         except (IndexError, KeyError):
             d["agent_id"] = ""
             d["scene"] = ""
+        try:
+            d["scope"] = row["scope"] or "private"
+            d["conversation_id"] = row["conversation_id"] or ""
+        except (IndexError, KeyError):
+            d["scope"] = "private"
+            d["conversation_id"] = ""
         return d
 
     def _row_to_cell(self, row) -> dict:
@@ -270,6 +396,12 @@ class SQLiteStore(BaseStore):
             d["agent_id"] = ""
             d["scene"] = ""
             d["cell_type"] = "fact"
+        try:
+            d["scope"] = row["scope"] or "private"
+            d["conversation_id"] = row["conversation_id"] or ""
+        except (IndexError, KeyError):
+            d["scope"] = "private"
+            d["conversation_id"] = ""
         return d
 
     def _row_to_scene(self, row) -> dict:

@@ -30,12 +30,15 @@ class HTTPMemoryClient:
 
     def __init__(self, base_url: str = "http://localhost:8765",
                  agent_id: str = "", default_scene: str = "",
-                 recall_limit: int = 5, timeout: int = 10):
+                 recall_limit: int = 5, timeout: int = 10,
+                 default_scope: str = "private", conversation_id: str = ""):
         self.base_url = base_url.rstrip("/")
         self.agent_id = agent_id
         self.default_scene = default_scene
         self.recall_limit = recall_limit
         self.timeout = timeout
+        self.default_scope = default_scope
+        self.conversation_id = conversation_id
         self.metrics = AdapterMetrics()
 
     def _request(self, path: str, data: dict = None, method: str = "POST") -> dict:
@@ -61,8 +64,11 @@ class HTTPMemoryClient:
 
     def write_memory(self, content: str, scene: str = None,
                      memory_type: str = "fact", confidence: float = 0.8,
-                     metadata: dict = None) -> str:
+                     metadata: dict = None, scope: str = None,
+                     conversation_id: str = None) -> str:
         effective_scene = scene or self.default_scene
+        effective_scope = scope or self.default_scope
+        effective_conv = conversation_id or self.conversation_id
         start = time.time()
         result = self._request("/memory/write", {
             "content": content,
@@ -71,6 +77,8 @@ class HTTPMemoryClient:
             "confidence": confidence,
             "agent_id": self.agent_id,
             "metadata": metadata or {},
+            "scope": effective_scope,
+            "conversation_id": effective_conv,
         })
         elapsed = (time.time() - start) * 1000
         self.metrics.writes += 1
@@ -80,15 +88,17 @@ class HTTPMemoryClient:
         return result.get("memory_id", "")
 
     def recall_memory(self, query: str, scene: str = None,
-                      limit: int = None) -> List[Dict]:
+                      limit: int = None, conversation_id: str = None) -> List[Dict]:
         effective_scene = scene or self.default_scene
         effective_limit = limit or self.recall_limit
+        effective_conv = conversation_id or self.conversation_id
         start = time.time()
         result = self._request("/memory/search", {
             "query": query,
             "scene": effective_scene,
             "agent_id": self.agent_id,
             "limit": effective_limit,
+            "conversation_id": effective_conv,
         })
         elapsed = (time.time() - start) * 1000
         self.metrics.recalls += 1
@@ -98,9 +108,11 @@ class HTTPMemoryClient:
         return result.get("results", [])
 
     def recall_context(self, query: str, scene: str = None,
-                       limit: int = None, mode: str = "kv") -> dict:
+                       limit: int = None, mode: str = "kv",
+                       conversation_id: str = None) -> dict:
         effective_scene = scene or self.default_scene
         effective_limit = limit or self.recall_limit
+        effective_conv = conversation_id or self.conversation_id
         start = time.time()
         result = self._request("/memory/recall", {
             "query": query,
@@ -108,6 +120,7 @@ class HTTPMemoryClient:
             "agent_id": self.agent_id,
             "limit": effective_limit,
             "mode": mode,
+            "conversation_id": effective_conv,
         })
         elapsed = (time.time() - start) * 1000
         self.metrics.recalls += 1

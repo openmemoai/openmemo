@@ -35,6 +35,8 @@ class OpenMemoMCPServer(BaseMemoryAdapter):
                         "memory_type": {"type": "string", "enum": ["fact", "decision", "preference", "constraint", "observation"]},
                         "confidence": {"type": "number", "description": "Confidence level 0-1", "default": 0.8},
                         "agent_id": {"type": "string", "description": "Agent identifier"},
+                        "scope": {"type": "string", "enum": ["private", "shared", "conversation"], "description": "Memory scope", "default": "private"},
+                        "conversation_id": {"type": "string", "description": "Conversation identifier for conversation-scoped memories"},
                     },
                     "required": ["content"],
                 },
@@ -82,6 +84,8 @@ class OpenMemoMCPServer(BaseMemoryAdapter):
                 scene=arguments.get("scene", ""),
                 memory_type=arguments.get("memory_type", "fact"),
                 confidence=arguments.get("confidence", 0.8),
+                scope=arguments.get("scope", ""),
+                conversation_id=arguments.get("conversation_id", ""),
             )
             return {"memory_id": memory_id, "status": "stored"}
 

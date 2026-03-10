@@ -47,6 +47,8 @@ class MemCell:
     created_at: float = field(default_factory=time.time)
     agent_id: str = ""
     scene: str = ""
+    scope: str = "private"
+    conversation_id: str = ""
     embedding: Optional[list] = None
     connections: list = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
@@ -85,6 +87,8 @@ class MemCell:
             "created_at": self.created_at,
             "agent_id": self.agent_id,
             "scene": self.scene,
+            "scope": self.scope,
+            "conversation_id": self.conversation_id,
             "connections": self.connections,
             "metadata": self.metadata,
         }
@@ -104,6 +108,8 @@ class MemCell:
             created_at=data.get("created_at", time.time()),
             agent_id=data.get("agent_id", ""),
             scene=data.get("scene", ""),
+            scope=data.get("scope", "private"),
+            conversation_id=data.get("conversation_id", ""),
             connections=data.get("connections", []),
             metadata=data.get("metadata", {}),
         )
