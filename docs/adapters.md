@@ -10,8 +10,9 @@ Agent Layer                    Adapter Layer                  OpenMemo Core
 OpenClaw            →         OpenClawMemoryBackend   →
 LangChain           →         OpenMemoMemory          →     MemCell Engine
 CrewAI              →         CrewAIMemory            →     MemScene Engine
-Claude MCP          →         OpenMemoMCPServer       →     Recall Engine
-Any HTTP client     →         HTTPMemoryClient        →     Governance Layer
+AutoGen             →         AutoGenMemory           →     Recall Engine
+Claude MCP          →         OpenMemoMCPServer       →     Governance Layer
+Any HTTP client     →         HTTPMemoryClient        →
 Custom agent        →         BaseMemoryAdapter       →
 ```
 
@@ -61,6 +62,21 @@ researcher.on_task_complete("Research API design", "Use REST with OpenAPI")
 
 coder.on_agent_action("coder", "Implemented REST API with Flask")
 context = coder.inject_context("How should I build the API?")
+```
+
+### AutoGen
+
+```python
+from openmemo.adapters.autogen_adapter import AutoGenMemory
+
+memory = AutoGenMemory(agent_id="assistant", group_id="dev_chat")
+
+memory.on_message("user_proxy", "Write a sorting algorithm in Python")
+memory.on_reply("assistant", "Here is a quicksort implementation...")
+memory.on_tool_call("coder", "run_code", "All tests passed")
+memory.on_task_complete("Implement sorting", "Quicksort delivered")
+
+context = memory.inject_context("How should I optimize the sort?")
 ```
 
 ### MCP (Claude)

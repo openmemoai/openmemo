@@ -5,6 +5,7 @@ from openmemo.adapters.base_adapter import BaseMemoryAdapter, AdapterMetrics
 from openmemo.adapters.openclaw import OpenClawMemoryBackend
 from openmemo.adapters.langchain import OpenMemoMemory
 from openmemo.adapters.crewai_adapter import CrewAIMemory
+from openmemo.adapters.autogen_adapter import AutoGenMemory
 from openmemo.adapters.mcp import OpenMemoMCPServer
 from openmemo.adapters.http_adapter import HTTPMemoryClient
 
@@ -326,8 +327,62 @@ class TestHTTPAdapter:
         client.close()
 
 
+class TestAutoGenAdapter:
+    def test_adapter_name(self):
+        assert AutoGenMemory.adapter_name == "autogen"
+
+    def test_inherits_base(self, mem):
+        memory = AutoGenMemory(memory=mem, agent_id="assistant")
+        assert isinstance(memory, BaseMemoryAdapter)
+
+    def test_group_id(self, mem):
+        memory = AutoGenMemory(memory=mem, group_id="chat_group")
+        assert memory.group_id == "chat_group"
+
+    def test_on_message(self, mem):
+        memory = AutoGenMemory(memory=mem, agent_id="assistant", group_id="g1")
+        memory.on_message("user_proxy", "Please write a sort function")
+        results = memory.recall_memory("sort function")
+        assert isinstance(results, list)
+
+    def test_on_reply(self, mem):
+        memory = AutoGenMemory(memory=mem, agent_id="assistant")
+        memory.on_reply("assistant", "Here is a quicksort implementation")
+        results = memory.recall_memory("quicksort")
+        assert isinstance(results, list)
+
+    def test_on_tool_call(self, mem):
+        memory = AutoGenMemory(memory=mem, agent_id="coder")
+        memory.on_tool_call("coder", "run_code", "Execution successful")
+        results = memory.recall_memory("run_code")
+        assert isinstance(results, list)
+
+    def test_on_task_complete(self, mem):
+        memory = AutoGenMemory(memory=mem, agent_id="planner")
+        memory.on_task_complete("Sort implementation", "Quicksort chosen")
+        results = memory.recall_memory("sort")
+        assert len(results) >= 1
+
+    def test_conversation_context(self, mem):
+        memory = AutoGenMemory(memory=mem, agent_id="assistant")
+        memory.on_message("user", "Use Python for the backend")
+        ctx = memory.get_conversation_context("Python backend")
+        assert isinstance(ctx, list)
+
+    def test_inject_context(self, mem):
+        memory = AutoGenMemory(memory=mem, agent_id="assistant")
+        memory.write_memory("User prefers functional programming", memory_type="preference")
+        result = memory.inject_context("What paradigm?", query="functional programming")
+        assert isinstance(result, str)
+
+    def test_group_metadata_tagged(self, mem):
+        memory = AutoGenMemory(memory=mem, agent_id="assistant", group_id="team_chat")
+        memory.on_message("user", "Test metadata tagging")
+        assert memory.metrics.writes == 1
+
+
 class TestAdapterUniformInterface:
-    @pytest.fixture(params=["openclaw", "langchain", "crewai", "mcp"])
+    @pytest.fixture(params=["openclaw", "langchain", "crewai", "autogen", "mcp"])
     def adapter(self, request, mem):
         if request.param == "openclaw":
             return OpenClawMemoryBackend(memory=mem, agent_id="test")
@@ -335,6 +390,8 @@ class TestAdapterUniformInterface:
             return OpenMemoMemory(memory=mem, agent_id="test")
         elif request.param == "crewai":
             return CrewAIMemory(memory=mem, agent_id="test")
+        elif request.param == "autogen":
+            return AutoGenMemory(memory=mem, agent_id="test")
         elif request.param == "mcp":
             return OpenMemoMCPServer(memory=mem, agent_id="test")
 
