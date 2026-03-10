@@ -2,11 +2,27 @@
 
 **The Memory Infrastructure for AI Agents.**
 
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/openmemoai/openmemo/blob/main/LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/openmemo.svg)](https://pypi.org/project/openmemo/)
+[![Python](https://img.shields.io/badge/python-3.9%20|%203.10%20|%203.11%20|%203.12-blue)](https://pypi.org/project/openmemo/)
+
+[![Works with LangChain](https://img.shields.io/badge/Works%20with-LangChain-orange)](https://github.com/openmemoai/openmemo/blob/main/docs/adapters.md)
+[![Works with CrewAI](https://img.shields.io/badge/Works%20with-CrewAI-green)](https://github.com/openmemoai/openmemo/blob/main/docs/adapters.md)
+[![Works with AutoGen](https://img.shields.io/badge/Works%20with-AutoGen-red)](https://github.com/openmemoai/openmemo/blob/main/docs/adapters.md)
+[![Works with Claude](https://img.shields.io/badge/Works%20with-Claude-blueviolet)](https://github.com/openmemoai/openmemo/blob/main/docs/adapters.md)
+[![Works with Cursor](https://img.shields.io/badge/Works%20with-Cursor-blue)](https://github.com/openmemoai/openmemo/blob/main/docs/adapters.md)
+
+[![MCP](https://img.shields.io/badge/MCP-Remote%20Support-purple)](https://github.com/openmemoai/openmemo/blob/main/docs/adapters.md)
+[![claude.ai](https://img.shields.io/badge/claude.ai-Browser%20Compatible-green)](https://github.com/openmemoai/openmemo/blob/main/docs/adapters.md)
+[![Any HTTP Client](https://img.shields.io/badge/Any-HTTP%20Client-lightgrey)](https://github.com/openmemoai/openmemo/blob/main/docs/adapters.md)
+
 Most AI memory systems today are just wrappers around vector databases.
 
 OpenMemo is different.
 
 Instead of storing memory as flat embeddings, OpenMemo introduces a structured memory architecture designed for long-running AI systems.
+
+Works with LangChain · CrewAI · AutoGen · any HTTP client · Claude Desktop · Cursor · VS Code · Gemini CLI
 
 ```
 MemCell → MemScene → Memory Pyramid → Reconstructive Recall
