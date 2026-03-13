@@ -49,6 +49,8 @@ class MemCell:
     scene: str = ""
     scope: str = "private"
     conversation_id: str = ""
+    team_id: str = ""
+    task_id: str = ""
     embedding: Optional[list] = None
     connections: list = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
@@ -89,6 +91,8 @@ class MemCell:
             "scene": self.scene,
             "scope": self.scope,
             "conversation_id": self.conversation_id,
+            "team_id": self.team_id,
+            "task_id": self.task_id,
             "connections": self.connections,
             "metadata": self.metadata,
         }
@@ -110,6 +114,8 @@ class MemCell:
             scene=data.get("scene", ""),
             scope=data.get("scope", "private"),
             conversation_id=data.get("conversation_id", ""),
+            team_id=data.get("team_id", ""),
+            task_id=data.get("task_id", ""),
             connections=data.get("connections", []),
             metadata=data.get("metadata", {}),
         )

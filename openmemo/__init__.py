@@ -18,7 +18,7 @@ from openmemo.skill.skill_engine import SkillEngine, Skill
 from openmemo.team.team_router import route_scope, build_namespace, apply_scope_weights, get_scope_weight
 from openmemo.team.promotion import PromotionWorker, PromotionConfig
 
-__version__ = "0.11.1"
+__version__ = "0.12.0"
 __all__ = [
     "OpenMemo", "Memory", "MemoryClient", "RemoteMemory",
     "OpenMemoConfig", "HybridConfig", "CellType",

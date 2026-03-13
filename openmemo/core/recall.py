@@ -35,11 +35,14 @@ class BM25Strategy(RecallStrategy):
         agent_id = kwargs.get("agent_id")
         scene = kwargs.get("scene")
         conversation_id = kwargs.get("conversation_id")
+        team_id = kwargs.get("team_id")
+        task_id = kwargs.get("task_id")
 
         if agent_id and hasattr(store, "list_cells_scoped"):
             all_cells = store.list_cells_scoped(
                 agent_id=agent_id, conversation_id=conversation_id,
                 scene=scene, limit=500,
+                team_id=team_id, task_id=task_id,
             )
         else:
             all_cells = store.list_cells(agent_id=agent_id, scene=scene)
@@ -98,6 +101,10 @@ class VectorStrategy(RecallStrategy):
                         cell_agent = cell.get("agent_id", "")
                         if scope == "shared":
                             pass
+                        elif scope == "team":
+                            t_id = kwargs.get("team_id")
+                            if t_id and cell.get("team_id", "") and cell.get("team_id") != t_id:
+                                continue
                         elif scope == "conversation":
                             conv_id = kwargs.get("conversation_id")
                             if cell.get("conversation_id", "") != conv_id:
@@ -155,6 +162,54 @@ class DefaultMergeStrategy(MergeStrategy):
         return merged[:top_k]
 
 
+class NormalizedMergeStrategy(MergeStrategy):
+    def __init__(self, bm25_weight: float = 0.4, vector_weight: float = 0.6):
+        self._bm25_weight = bm25_weight
+        self._vector_weight = vector_weight
+
+    def merge(self, results: List[RecallResultItem], top_k: int) -> List[RecallResult]:
+        by_source = {}
+        for r in results:
+            source = r.source
+            if source not in by_source:
+                by_source[source] = []
+            by_source[source].append(r)
+
+        normalized = []
+        for source, items in by_source.items():
+            if not items:
+                continue
+            max_score = max(r.score for r in items)
+            if max_score <= 0:
+                continue
+            weight = self._vector_weight if source == "middle" else self._bm25_weight
+            for r in items:
+                norm_score = (r.score / max_score) * weight
+                normalized.append(RecallResultItem(
+                    cell_id=r.cell_id,
+                    content=r.content,
+                    score=norm_score,
+                    source=r.source,
+                ))
+
+        seen = {}
+        for r in normalized:
+            if r.cell_id in seen:
+                existing = seen[r.cell_id]
+                existing.score = existing.score + r.score
+            else:
+                seen[r.cell_id] = RecallResult(
+                    cell_id=r.cell_id,
+                    content=r.content,
+                    score=r.score,
+                    source=r.source,
+                )
+
+        merged = list(seen.values())
+        merged.sort(key=lambda x: x.score, reverse=True)
+        return merged[:top_k]
+
+
 class RecallEngine:
     def __init__(self, store=None, vector_store=None, embed_fn=None,
                  strategies: List[RecallStrategy] = None,
@@ -182,9 +237,16 @@ class RecallEngine:
     def recall(self, query: str, top_k: int = 10, budget: int = 2000,
                agent_id: str = None, scene: str = None,
                conversation_id: str = None,
-               graph: bool = None) -> List[RecallResult]:
+               graph: bool = None,
+               team_id: str = None, task_id: str = None) -> List[RecallResult]:
         all_results = []
-        extra = {"conversation_id": conversation_id} if conversation_id else {}
+        extra = {}
+        if conversation_id:
+            extra["conversation_id"] = conversation_id
+        if team_id:
+            extra["team_id"] = team_id
+        if task_id:
+            extra["task_id"] = task_id
 
         if self._constitution and self._constitution.should_prefer_scene_local() and scene:
             for strategy in self._strategies:

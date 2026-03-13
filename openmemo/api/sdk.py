@@ -22,11 +22,17 @@ from openmemo.core.scene import MemScene
 from openmemo.core.recall import RecallEngine
 from openmemo.core.reconstruct import ReconstructiveRecall
 from openmemo.core.graph import GraphBuilder, get_memory_graph, detect_conflicts
+from openmemo.core.consolidation import ConsolidationEngine, ConsolidationConfig
+from openmemo.sync.memory_router import MemoryRouter
+from openmemo.sync.sync_engine import SyncEngine, SyncConfig
+from openmemo.sync.sync_worker import SyncWorker
 from openmemo.storage.sqlite_store import SQLiteStore
 from openmemo.storage.vector_store import VectorStore
 from openmemo.pyramid.pyramid_engine import PyramidEngine
 from openmemo.pyramid.summarizer import Summarizer
 from openmemo.skill.skill_engine import SkillEngine
+from openmemo.team.team_router import route_scope, build_namespace, apply_scope_weights
+from openmemo.team.promotion import PromotionWorker, PromotionConfig
 from openmemo.governance.conflict_detector import ConflictDetector
 from openmemo.governance.version_manager import VersionManager
 from openmemo.constitution.constitution_loader import load_constitution
@@ -53,11 +59,55 @@ class Memory:
     """
 
     def __init__(self, db_path: str = "openmemo.db", store=None,
-                 embed_fn: Callable = None, config: OpenMemoConfig = None):
+                 embed_fn: Callable = None, config: OpenMemoConfig = None,
+                 cloud_store=None):
         self._config = config or OpenMemoConfig()
-        self.store = store or SQLiteStore(db_path)
+        self._db_path = db_path
         self.embed_fn = embed_fn
         self.vector_store = VectorStore() if embed_fn else None
+
+        local_store = store or SQLiteStore(db_path)
+        self._local_store = local_store
+        self._cloud_store = cloud_store
+
+        hybrid_cfg = self._config.hybrid
+        memory_mode = hybrid_cfg.memory_mode
+
+        if memory_mode in ("hybrid", "cloud") and not cloud_store:
+            import logging
+            logging.getLogger("openmemo").warning(
+                "[openmemo] memory_mode='%s' but no cloud_store provided — falling back to local mode",
+                memory_mode,
+            )
+            memory_mode = "local"
+
+        if memory_mode in ("hybrid", "cloud") and cloud_store:
+            sync_config = SyncConfig(
+                sync_interval=hybrid_cfg.sync_interval,
+                conflict_strategy=hybrid_cfg.conflict_strategy,
+                batch_size=hybrid_cfg.batch_size,
+                encryption_enabled=hybrid_cfg.encryption_enabled,
+            )
+            self.sync_engine = SyncEngine(
+                local_store=local_store, cloud_store=cloud_store,
+                config=sync_config, db_path=db_path,
+            )
+            self.router = MemoryRouter(
+                mode=memory_mode, local_store=local_store,
+                cloud_store=cloud_store, sync_engine=self.sync_engine,
+            )
+            self.store = self.router
+            self.sync_worker = SyncWorker(
+                sync_engine=self.sync_engine,
+                interval=hybrid_cfg.sync_interval,
+            )
+            if hybrid_cfg.auto_sync:
+                self.sync_worker.start()
+        else:
+            self.sync_engine = None
+            self.router = None
+            self.store = local_store
+            self.sync_worker = None
 
         if self._config.constitution.enabled:
             constitution_config = load_constitution(self._config.constitution.path)
@@ -93,6 +143,9 @@ class Memory:
         self._registry = ConstitutionRegistry()
         self.graph_builder = GraphBuilder(store=self.store)
         self._auto_graph = True
+        self.consolidation = ConsolidationEngine(
+            store=self.store, embed_fn=self.embed_fn,
+        )
 
     # ─── Constitution Profile API ───
 
@@ -123,26 +176,34 @@ class Memory:
     def write_memory(self, content: str, scene: str = "",
                      memory_type: str = "fact", confidence: float = 0.8,
                      agent_id: str = "", metadata: dict = None,
-                     scope: str = "", conversation_id: str = "") -> str:
+                     scope: str = "", conversation_id: str = "",
+                     team_id: str = "", task_id: str = "") -> str:
         effective_scope = scope
         if not effective_scope:
-            effective_scope = "shared" if memory_type in self.SHARED_TYPES else "private"
+            if memory_type in self.SHARED_TYPES:
+                effective_scope = "shared"
+            else:
+                effective_scope = route_scope(memory_type, scope=scope,
+                                              team_id=team_id, task_id=task_id)
         return self._write_impl(
             content=content, scene=scene, cell_type=memory_type,
             confidence=confidence, agent_id=agent_id,
             source="manual", metadata=metadata,
             scope=effective_scope, conversation_id=conversation_id,
+            team_id=team_id, task_id=task_id,
         )
 
     # ─── Core API 2: search_memory ───
 
     def search_memory(self, query: str, scene: str = "",
                       agent_id: str = "", limit: int = 10,
-                      conversation_id: str = "") -> List[dict]:
+                      conversation_id: str = "",
+                      team_id: str = "", task_id: str = "") -> List[dict]:
         results = self.recall_engine.recall(
             query, top_k=limit, budget=50000,
             agent_id=agent_id or None, scene=scene or None,
             conversation_id=conversation_id or None,
+            team_id=team_id or None, task_id=task_id or None,
         )
         items = [
             {
@@ -159,7 +220,8 @@ class Memory:
     def recall_context(self, query: str, scene: str = "",
                        agent_id: str = "", limit: int = 5,
                        mode: str = "kv", conversation_id: str = "",
-                       graph: bool = None) -> dict:
+                       graph: bool = None,
+                       team_id: str = "", task_id: str = "") -> dict:
         if mode == "narrative":
             result = self.reconstructor.reconstruct(
                 query, max_sources=limit,
@@ -184,6 +246,7 @@ class Memory:
             agent_id=agent_id or None, scene=scene or None,
             conversation_id=conversation_id or None,
             graph=graph,
+            team_id=team_id or None, task_id=task_id or None,
         )
 
         for r in results:
@@ -216,6 +279,8 @@ class Memory:
             return self._governance_decay(cells)
         elif operation == "cleanup":
             return self._governance_cleanup(cells)
+        elif operation == "consolidate":
+            return self.consolidate()
         else:
             return {"error": f"Unknown operation: {operation}"}
 
@@ -311,6 +376,54 @@ class Memory:
 
     def list_edges(self, limit: int = 100) -> List[dict]:
         return self.store.list_edges(limit=limit)
+
+    # ─── Memory Consolidation API ───
+
+    def consolidate(self, agent_id: str = "", scene: str = "") -> dict:
+        result = self.consolidation.run(
+            agent_id=agent_id or None, scene=scene or None,
+        )
+        return result.to_dict()
+
+    def get_patterns(self, agent_id: str = "", scene: str = "") -> List[dict]:
+        return self.consolidation.get_patterns(
+            agent_id=agent_id or None, scene=scene or None,
+        )
+
+    def detect_duplicates(self, agent_id: str = "") -> List[dict]:
+        return self.consolidation.detect_duplicates(agent_id=agent_id or None)
+
+    # ─── Hybrid Memory / Sync API ───
+
+    def push_sync(self) -> dict:
+        if not self.sync_engine:
+            return {"error": "sync not configured", "pushed": 0}
+        return self.sync_engine.push_sync()
+
+    def pull_sync(self, since: float = 0) -> dict:
+        if not self.sync_engine:
+            return {"error": "sync not configured", "pulled": 0}
+        return self.sync_engine.pull_sync(since=since)
+
+    def full_sync(self) -> dict:
+        if not self.sync_engine:
+            return {"error": "sync not configured"}
+        return self.sync_engine.full_sync()
+
+    def get_sync_status(self) -> dict:
+        if self.router:
+            return self.router.get_status()
+        return {
+            "mode": "local",
+            "local_available": True,
+            "cloud_available": False,
+            "sync_enabled": False,
+        }
+
+    def get_memory_mode(self) -> str:
+        if self.router:
+            return self.router.get_mode()
+        return "local"
 
     # ─── Backward-compatible aliases ───
 
@@ -426,7 +539,8 @@ class Memory:
     def _write_impl(self, content: str, scene: str, cell_type: str,
                     confidence: float, agent_id: str,
                     source: str, metadata: dict,
-                    scope: str = "private", conversation_id: str = "") -> str:
+                    scope: str = "private", conversation_id: str = "",
+                    team_id: str = "", task_id: str = "") -> str:
         from openmemo._internal import get_evolution_params
 
         if self.constitution and not self.constitution.should_store(cell_type, content):
@@ -438,6 +552,8 @@ class Memory:
         note_dict["scene"] = scene
         note_dict["scope"] = scope
         note_dict["conversation_id"] = conversation_id
+        note_dict["team_id"] = team_id
+        note_dict["task_id"] = task_id
         self.store.put_note(note_dict)
 
         importance = confidence if confidence else get_evolution_params()["default_importance"]
@@ -456,6 +572,8 @@ class Memory:
             scene=scene,
             scope=scope,
             conversation_id=conversation_id,
+            team_id=team_id,
+            task_id=task_id,
         )
         cell.metadata["confidence"] = confidence
 
@@ -634,6 +752,101 @@ class Memory:
             "orphaned_edges_removed": orphaned_edges,
             "total_cells": len(remaining_cells),
         }
+
+    def extract_skills_from_memory(self) -> List[dict]:
+        import json as _json
+        cells = self.store.list_cells(limit=1000)
+
+        def _resolve_confidence(cell: dict) -> float:
+            if "confidence" in cell and cell["confidence"]:
+                return float(cell["confidence"])
+            meta = cell.get("metadata", {})
+            if isinstance(meta, str):
+                try:
+                    meta = _json.loads(meta)
+                except Exception:
+                    meta = {}
+            return float(meta.get("confidence", 0.5))
+
+        patterns = []
+        playbooks = []
+        for c in cells:
+            ct = c.get("cell_type", "")
+            if ct == "pattern":
+                c["confidence"] = _resolve_confidence(c)
+                patterns.append(c)
+            elif ct == "playbook":
+                meta = c.get("metadata", {})
+                if isinstance(meta, str):
+                    try:
+                        meta = _json.loads(meta)
+                    except Exception:
+                        meta = {}
+                c["metadata"] = meta
+                c["confidence"] = _resolve_confidence(c)
+                playbooks.append(c)
+
+        new_skills = self.skill_engine.extract_from_patterns(patterns, playbooks)
+        return [s.to_dict() for s in new_skills]
+
+    def recall_skills(self, query: str, scene: str = "",
+                      top_k: int = 5) -> List[dict]:
+        return self.skill_engine.recall_skills(query, scene=scene, top_k=top_k)
+
+    def execute_skill(self, skill_id: str,
+                      mode: str = "suggest") -> dict:
+        return self.skill_engine.execute_skill(skill_id, mode=mode)
+
+    def record_skill_feedback(self, skill_id: str, success: bool,
+                              result: str = "") -> dict:
+        return self.skill_engine.record_feedback(skill_id, success, result)
+
+    def evolve_skills(self) -> dict:
+        return self.skill_engine.evolve_skills()
+
+    def get_skill(self, skill_id: str) -> dict:
+        data = self.store.get_skill(skill_id)
+        return data or {}
+
+    def list_skills(self, scene: str = "", status: str = "") -> List[dict]:
+        return self.store.list_skills(scene=scene, status=status)
+
+    # ─── Team Memory ───
+
+    def promote_to_team(self, team_id: str = "") -> dict:
+        worker = PromotionWorker(store=self.store)
+        return worker.promote_to_team(team_id=team_id)
+
+    def list_team_memories(self, team_id: str = "",
+                           scene: str = "") -> List[dict]:
+        cells = self.store.list_cells(limit=1000)
+        results = []
+        for c in cells:
+            if c.get("scope") != "team":
+                continue
+            if team_id and c.get("team_id", "") != team_id:
+                continue
+            if scene and c.get("scene", "") != scene:
+                continue
+            results.append(c)
+        return results
+
+    def list_task_memories(self, task_id: str,
+                           team_id: str = "") -> List[dict]:
+        cells = self.store.list_cells(limit=1000)
+        results = []
+        for c in cells:
+            scope = c.get("scope", "private")
+            if scope not in ("shared", "team"):
+                continue
+            if team_id and c.get("team_id", "") and c.get("team_id") != team_id:
+                continue
+            cell_task = c.get("task_id", "")
+            if cell_task == task_id:
+                results.append(c)
+            elif scope == "team":
+                results.append(c)
+        return results
 
     def close(self):
         self.store.close()
